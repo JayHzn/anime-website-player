@@ -73,15 +73,12 @@ export default function VideoPlayer({
       }
     };
 
-    if (videoData.url.includes('.m3u8') && Hls.isSupported()) {
-      const hls = new Hls({
-        xhrSetup: (xhr) => {
-          if (videoData.referer) {
-            // Note: referer header may be blocked by browser
-          }
-        },
-      });
-      hls.loadSource(videoData.url);
+    // Use proxy URL if available (production), otherwise direct URL
+    const hlsUrl = videoData.proxy_url || videoData.url;
+
+    if (hlsUrl.includes('.m3u8') && Hls.isSupported()) {
+      const hls = new Hls();
+      hls.loadSource(hlsUrl);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         setIsLoading(false);
