@@ -1,0 +1,31 @@
+# Stage 1: Build React frontend
+FROM node:20-alpine AS frontend-build
+
+WORKDIR /app/front
+COPY front/package.json front/package-lock.json* ./
+RUN npm install
+COPY front/ .
+RUN npm run build
+
+# Stage 2: Python backend + static frontend
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install production dependencies only (no ML)
+COPY back/requirements.prod.txt requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy backend source (exclude ML modules)
+COPY back/ .
+RUN rm -rf ml/ ml_data/
+
+# Copy built frontend
+COPY --from=frontend-build /app/front/dist /app/static
+
+# Create data directory for SQLite
+RUN mkdir -p /app/data
+
+EXPOSE 8000
+
+CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}

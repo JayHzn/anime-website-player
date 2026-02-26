@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker stats --no-stream animehub-api)",
+      "Bash(# The tunnel returns 404 but localhost works. Check if cloudflared is pointing to right port. # Also check if it''s reaching the right service curl -s -o /dev/null -w \"\"HTTP %{http_code}\"\" \"\"http://localhost:3000/\"\" 2>&1 echo \"\"\"\" # Check if cloudflared process is running tasklist)",
+      "Bash(taskkill //F //IM cloudflared.exe)",
+      "Bash(docker build -f Dockerfile.production -t animehub-prod .)",
+      "Bash(docker run -d --name animehub-test -p 8080:8000 animehub-prod)",
+      "Bash(docker stop animehub-test)",
+      "Bash(docker rm animehub-test)"
+    ]
+  }
+}

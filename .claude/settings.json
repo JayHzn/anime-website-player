@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Program Files/Docker/Docker/**)",
+      "Bash(reg add \"HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run\" /v \"Docker Desktop\" /t REG_SZ /d \"\"\"C:\\\\Program Files\\\\Docker\\\\Docker\\\\Docker Desktop.exe\"\"\" /f)",
+      "Bash(docker compose exec:*)",
+      "Bash(docker compose:*)",
+      "Bash(docker compose up:*)",
+      "Bash(curl:*)",
+      "Bash(python3:*)",
+      "Bash(__NEW_LINE_c323a10699c0bbaa__ echo \"=== Search headers ===\")",
+      "Bash(__NEW_LINE_098b11b5b06110e1__ echo \"=== Progress headers \\(should be no-store\\) ===\")",
+      "Bash(__NEW_LINE_38c39a7d98fa4025__ echo \"=== Sources headers ===\")",
+      "Bash(ipconfig:*)",
+      "Bash(netsh advfirewall firewall show rule:*)"
+    ]
+  }
+}

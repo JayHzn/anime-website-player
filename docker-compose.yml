@@ -1,0 +1,31 @@
+services:
+  backend:
+    build: ./back
+    container_name: animehub-api
+    ports:
+      - "8000:8000"
+    volumes:
+      # Hot-reload: tes modifs sont prises en compte sans rebuild
+      - ./back:/app
+      # Persiste la base de données en dehors du container
+      - animehub-data:/app/data
+      # Persiste les données ML (audio cache, modèles entraînés)
+      - animehub-ml:/app/ml_data
+    restart: unless-stopped
+
+  frontend:
+    build: ./front
+    container_name: animehub-web
+    ports:
+      - "3000:3000"
+    volumes:
+      # Hot-reload du frontend
+      - ./front:/app
+      - /app/node_modules  # évite d'écraser node_modules du container
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  animehub-data:
+  animehub-ml:

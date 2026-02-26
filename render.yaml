@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: animehub
+    runtime: docker
+    dockerfilePath: ./Dockerfile.production
+    plan: free
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: "8000"
+    disk:
+      name: animehub-data
+      mountPath: /app/data
+      sizeGB: 1
