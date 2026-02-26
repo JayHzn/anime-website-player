@@ -1,7 +1,8 @@
+import { memo } from 'react';
 import { Link } from 'react-router-dom';
 import { Play } from 'lucide-react';
 
-export default function AnimeCard({ anime, index = 0 }) {
+export default memo(function AnimeCard({ anime, index = 0 }) {
   const delayClass = `animate-fade-up-delay-${(index % 4) + 1}`;
 
   return (
@@ -49,4 +50,4 @@ export default function AnimeCard({ anime, index = 0 }) {
       </div>
     </Link>
   );
-}
+})

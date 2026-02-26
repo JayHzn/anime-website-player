@@ -107,6 +107,11 @@ class SkipSegmentCorrection(BaseModel):
 
 @app.get("/")
 def root():
+    # In production, serve the frontend; otherwise return API status
+    static_index = os.path.join(os.path.dirname(__file__), "static", "index.html")
+    if os.path.isfile(static_index):
+        from fastapi.responses import FileResponse
+        return FileResponse(static_index)
     return {"status": "ok", "sources": list(loaded_sources.keys())}
 
 
@@ -417,7 +422,6 @@ def ml_status():
 # --- Static Frontend (production) ---
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(STATIC_DIR):
-    from fastapi.staticfiles import StaticFiles
     from fastapi.responses import FileResponse
 
     @app.get("/assets/{file_path:path}")

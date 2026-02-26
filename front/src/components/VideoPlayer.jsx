@@ -28,6 +28,7 @@ export default function VideoPlayer({
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const lastTimeUpdateRef = useRef(0);
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -350,8 +351,13 @@ export default function VideoPlayer({
         onPause={() => setIsPlaying(false)}
         onTimeUpdate={() => {
           const time = videoRef.current?.currentTime || 0;
-          setCurrentTime(time);
-          // Check skip segments
+          // Throttle UI updates to ~5/sec instead of 60/sec
+          const now = Date.now();
+          if (now - lastTimeUpdateRef.current > 200) {
+            setCurrentTime(time);
+            lastTimeUpdateRef.current = now;
+          }
+          // Check skip segments (always, for responsiveness)
           if (skipSegments) {
             const { opening, ending } = skipSegments;
             if (opening && time >= opening.start && time < opening.end - 3

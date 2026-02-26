@@ -7,7 +7,8 @@
       "Bash(docker build -f Dockerfile.production -t animehub-prod .)",
       "Bash(docker run -d --name animehub-test -p 8080:8000 animehub-prod)",
       "Bash(docker stop animehub-test)",
-      "Bash(docker rm animehub-test)"
+      "Bash(docker rm animehub-test)",
+      "WebFetch(domain:anime-website-player.onrender.com)"
     ]
   }
 }

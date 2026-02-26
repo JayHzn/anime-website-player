@@ -34,8 +34,42 @@ export default function WatchPage() {
 
   useEffect(() => {
     loadVideo();
-    loadSkipSegments();
   }, [source, episodeId]);
+
+  // Skip segments polling with proper cleanup
+  useEffect(() => {
+    let intervalId = null;
+    let cancelled = false;
+
+    async function loadSkipSegments() {
+      try {
+        const epNum = currentEpisode?.number;
+        const data = await api.getSkipSegments(source, episodeId, epNum);
+        if (cancelled) return;
+        if (data.status === 'ready') {
+          setSkipSegments(data);
+        } else if (data.status === 'analyzing' || data.status === 'unavailable') {
+          intervalId = setInterval(async () => {
+            try {
+              const updated = await api.getSkipSegments(source, episodeId, epNum);
+              if (cancelled) return;
+              if (updated.status === 'ready') {
+                setSkipSegments(updated);
+                clearInterval(intervalId);
+                intervalId = null;
+              }
+            } catch { /* ignore */ }
+          }, 10000);
+        }
+      } catch { /* skip segments are optional */ }
+    }
+
+    loadSkipSegments();
+    return () => {
+      cancelled = true;
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [source, episodeId, currentEpisode?.number]);
 
   async function loadVideo() {
     setLoading(true);
@@ -48,28 +82,6 @@ export default function WatchPage() {
     } finally {
       setLoading(false);
     }
-  }
-
-  async function loadSkipSegments() {
-    try {
-      const epNum = currentEpisode?.number;
-      const data = await api.getSkipSegments(source, episodeId, epNum);
-      if (data.status === 'ready') {
-        setSkipSegments(data);
-      } else if (data.status === 'analyzing' || data.status === 'unavailable') {
-        // Backend auto-triggers analysis — poll every 10s until ready
-        const interval = setInterval(async () => {
-          try {
-            const updated = await api.getSkipSegments(source, episodeId, epNum);
-            if (updated.status === 'ready') {
-              setSkipSegments(updated);
-              clearInterval(interval);
-            }
-          } catch { /* ignore */ }
-        }, 10000);
-        return () => clearInterval(interval);
-      }
-    } catch { /* skip segments are optional */ }
   }
 
   // Save progress

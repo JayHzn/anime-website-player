@@ -124,11 +124,6 @@ async def fetch_covers_batch(titles: list[str]) -> dict[str, str]:
                 result[title] = entry["cover"]
                 continue
 
-        # Deduplicate: if same clean key already queued, skip
-        if any(key == cache_key for _, key in to_fetch):
-            to_fetch.append((title, cache_key))
-            continue
-
         to_fetch.append((title, cache_key))
 
     if not to_fetch:
