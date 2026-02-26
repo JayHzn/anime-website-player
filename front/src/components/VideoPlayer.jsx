@@ -76,7 +76,8 @@ export default function VideoPlayer({
     // Use proxy URL if available (production), otherwise direct URL
     const hlsUrl = videoData.proxy_url || videoData.url;
 
-    if (hlsUrl.includes('.m3u8') && Hls.isSupported()) {
+    const isHls = hlsUrl.includes('.m3u8') || hlsUrl.startsWith('/proxy/hls/');
+    if (isHls && Hls.isSupported()) {
       const hls = new Hls();
       hls.loadSource(hlsUrl);
       hls.attachMedia(video);
