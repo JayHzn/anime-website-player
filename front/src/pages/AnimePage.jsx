@@ -1,7 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Play, CheckCircle2 } from 'lucide-react';
+import { Play, CheckCircle2, Film } from 'lucide-react';
 import { api } from '../api';
+
+function getInitials(title) {
+  if (!title?.trim()) return '?';
+  const words = title.trim().split(/\s+/);
+  if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase().slice(0, 2);
+  return title.slice(0, 2).toUpperCase();
+}
 
 export default function AnimePage() {
   const { source, animeId } = useParams();
@@ -10,6 +17,8 @@ export default function AnimePage() {
   const [animeInfo, setAnimeInfo] = useState(null);
   const [progress, setProgress] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [coverLoaded, setCoverLoaded] = useState(false);
+  const [coverError, setCoverError] = useState(false);
 
   useEffect(() => {
     loadAnime();
@@ -50,6 +59,14 @@ export default function AnimePage() {
   }
 
   const currentEp = progress?.episode_number || 0;
+  const title = animeInfo?.title || animeId;
+  const hasCover = Boolean(animeInfo?.cover?.trim());
+  const showPlaceholder = !hasCover || coverError || (hasCover && !coverLoaded);
+
+  useEffect(() => {
+    setCoverLoaded(false);
+    setCoverError(false);
+  }, [animeInfo?.cover]);
 
   if (loading) {
     return (
@@ -64,16 +81,33 @@ export default function AnimePage() {
       {/* Hero */}
       <div className="flex flex-col sm:flex-row gap-6 mb-10 animate-fade-up">
         {/* Cover */}
-        {animeInfo?.cover && (
-          <div className="shrink-0 w-48 aspect-[3/4] rounded-xl overflow-hidden shadow-2xl shadow-black/50">
-            <img src={animeInfo.cover} alt="" className="w-full h-full object-cover" />
+        <div className="relative shrink-0 w-48 aspect-[3/4] rounded-xl overflow-hidden shadow-2xl shadow-black/50 bg-bg-card">
+          {hasCover && (
+            <img
+              src={animeInfo.cover}
+              alt=""
+              className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${
+                coverLoaded ? 'opacity-100' : 'opacity-0'
+              }`}
+              onLoad={() => setCoverLoaded(true)}
+              onError={() => setCoverError(true)}
+            />
+          )}
+          <div
+            className={`absolute inset-0 flex items-center justify-center bg-gradient-to-br from-white/10 to-white/5 transition-opacity duration-300 ${
+              showPlaceholder ? 'opacity-100' : 'opacity-0 pointer-events-none'
+            }`}
+            aria-hidden={!showPlaceholder}
+          >
+            <span className="text-4xl font-bold text-white/30 select-none">{getInitials(title)}</span>
+            <Film className="absolute bottom-3 right-3 w-8 h-8 text-white/20" aria-hidden />
           </div>
-        )}
+        </div>
 
         {/* Info */}
         <div className="flex-1">
           <h1 className="font-display font-extrabold text-2xl sm:text-3xl text-white leading-tight">
-            {animeInfo?.title || animeId}
+            {title}
           </h1>
 
           <div className="flex flex-wrap items-center gap-3 mt-3 text-sm text-white/40">

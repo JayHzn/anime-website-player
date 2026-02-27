@@ -24,9 +24,27 @@ const _coverCache = {};
 const COVER_TTL = 86400000; // 24h
 const COVER_ERROR_TTL = 60000; // 1min for errors (retry sooner)
 
-// Jikan rate limiter: max 2 concurrent, 400ms between requests
-let _jikanQueue = Promise.resolve();
-const _JIKAN_DELAY = 400;
+// Jikan: max 2 concurrent, 400ms between batch starts
+const JIKAN_CONCURRENCY = 2;
+const JIKAN_DELAY_MS = 400;
+let _jikanInFlight = 0;
+let _jikanLastStart = 0;
+
+async function _jikanAcquire() {
+  while (_jikanInFlight >= JIKAN_CONCURRENCY) {
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  const elapsed = Date.now() - _jikanLastStart;
+  if (elapsed < JIKAN_DELAY_MS) {
+    await new Promise((r) => setTimeout(r, JIKAN_DELAY_MS - elapsed));
+  }
+  _jikanInFlight++;
+  _jikanLastStart = Date.now();
+}
+
+function _jikanRelease() {
+  _jikanInFlight--;
+}
 
 // ── Regex HTML helpers ──────────────────────────────────────
 
@@ -71,7 +89,8 @@ export class VoiranimeSource {
     const results = [];
     const seenIds = new Set();
 
-    for (const searchId of [3, 2]) {
+    // Run both Ajax Search Pro requests in parallel (VOSTFR id=3, VF id=2)
+    const searchPromises = [3, 2].map(async (searchId) => {
       try {
         const body = new URLSearchParams({
           action: "ajaxsearchpro_search",
@@ -93,14 +112,18 @@ export class VoiranimeSource {
           body: body.toString(),
         });
 
-        if (!resp.ok) continue;
+        if (!resp.ok) return "";
         const html = await resp.text();
-        if (!html.trim()) continue;
-
-        this._parseSearchResults(html, seenIds, results);
+        return html.trim() || "";
       } catch (e) {
         console.warn(`[voiranime] Search error (id=${searchId}):`, e);
+        return "";
       }
+    });
+
+    const htmls = await Promise.all(searchPromises);
+    for (const html of htmls) {
+      if (html) this._parseSearchResults(html, seenIds, results);
     }
 
     if (results.length === 0) {
@@ -113,20 +136,33 @@ export class VoiranimeSource {
   }
 
   /**
-   * Enrich covers in-place and call onUpdate after each batch.
-   * Called separately from search() so results arrive fast.
+   * Enrich covers from Jikan (always — consistent quality).
+   * Runs in parallel (max 2 concurrent) for faster display.
+   * Throttles UI updates to every 200ms.
    */
   async enrichCoversAsync(results, onUpdate) {
-    let changed = false;
-    for (const r of results) {
-      if (r.cover) continue; // already has a cover
-      const cover = await this._fetchCover(r.title);
-      if (cover) {
-        r.cover = cover;
-        changed = true;
-      }
-    }
-    if (changed && onUpdate) onUpdate(results);
+    let scheduled = null;
+    const scheduleNotify = () => {
+      if (!onUpdate) return;
+      if (scheduled) return;
+      scheduled = setTimeout(() => {
+        scheduled = null;
+        onUpdate(results);
+      }, 200);
+    };
+
+    // Fetch all covers in parallel (semaphore limits to 2 concurrent)
+    await Promise.all(
+      results.map(async (r) => {
+        const cover = await this._fetchCover(r.title);
+        if (cover) {
+          r.cover = cover;
+          scheduleNotify();
+        }
+      })
+    );
+    if (scheduled) clearTimeout(scheduled);
+    if (onUpdate) onUpdate(results);
   }
 
   _parseSearchResults(html, seenIds, results) {
@@ -151,19 +187,13 @@ export class VoiranimeSource {
         title = stripTags(innerHtml);
       }
 
-      // Try to get cover from <img> inside
-      let cover = "";
-      const imgMatch = innerHtml.match(/<img\s[^>]*>/i);
-      if (imgMatch) {
-        cover = getAttr(imgMatch[0], "src") || getAttr(imgMatch[0], "data-src") || "";
-      }
-
+      // Cover always from Jikan (enrichCoversAsync) for consistent quality
       if (!title) title = slug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
       results.push({
         id: slug,
         title: decodeEntities(title),
-        cover,
+        cover: "",
         type: "TV",
         year: null,
       });
@@ -563,37 +593,30 @@ export class VoiranimeSource {
       if (Date.now() - cached.at < ttl) return cached.cover;
     }
 
-    // Queue to respect Jikan rate limit
-    const result = await new Promise((resolve) => {
-      _jikanQueue = _jikanQueue.then(async () => {
-        await new Promise((r) => setTimeout(r, _JIKAN_DELAY));
-        try {
-          const resp = await fetch(
-            `${JIKAN_BASE}/anime?q=${encodeURIComponent(key)}&limit=1&sfw=true`
-          );
-          if (resp.status === 429) {
-            console.warn(`[voiranime] Jikan 429 for '${key}', will retry later`);
-            resolve("");
-            return;
-          }
-          if (!resp.ok) {
-            _coverCache[key] = { cover: "", at: Date.now() };
-            resolve("");
-            return;
-          }
-          const data = await resp.json();
-          const cover = data.data?.[0]?.images?.jpg?.large_image_url || "";
-          _coverCache[key] = { cover, at: Date.now() };
-          console.log(`[voiranime] Cover for '${key}': ${cover ? 'found' : 'not found'}`);
-          resolve(cover);
-        } catch (e) {
-          console.warn(`[voiranime] Cover fetch error for '${key}':`, e.message);
-          _coverCache[key] = { cover: "", at: Date.now() };
-          resolve("");
-        }
-      });
-    });
-    return result;
+    await _jikanAcquire();
+    try {
+      const resp = await fetch(
+        `${JIKAN_BASE}/anime?q=${encodeURIComponent(key)}&limit=1&sfw=true`
+      );
+      if (resp.status === 429) {
+        console.warn(`[voiranime] Jikan 429 for '${key}', will retry later`);
+        return "";
+      }
+      if (!resp.ok) {
+        _coverCache[key] = { cover: "", at: Date.now() };
+        return "";
+      }
+      const data = await resp.json();
+      const cover = data.data?.[0]?.images?.jpg?.large_image_url || "";
+      _coverCache[key] = { cover, at: Date.now() };
+      return cover;
+    } catch (e) {
+      console.warn(`[voiranime] Cover fetch error for '${key}':`, e.message);
+      _coverCache[key] = { cover: "", at: Date.now() };
+      return "";
+    } finally {
+      _jikanRelease();
+    }
   }
 
   _cleanTitle(title) {

@@ -1,9 +1,26 @@
-import { memo } from 'react';
+import { memo, useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Play } from 'lucide-react';
+import { Play, Film } from 'lucide-react';
+
+/** First 2 letters of title for placeholder */
+function getInitials(title) {
+  if (!title?.trim()) return '?';
+  const words = title.trim().split(/\s+/);
+  if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase().slice(0, 2);
+  return title.slice(0, 2).toUpperCase();
+}
 
 export default memo(function AnimeCard({ anime, index = 0 }) {
   const delayClass = `animate-fade-up-delay-${(index % 4) + 1}`;
+  const hasCover = Boolean(anime.cover?.trim());
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState(false);
+  const showPlaceholder = !hasCover || error || (hasCover && !loaded);
+
+  useEffect(() => {
+    setLoaded(false);
+    setError(false);
+  }, [anime.cover]);
 
   return (
     <Link
@@ -12,12 +29,32 @@ export default memo(function AnimeCard({ anime, index = 0 }) {
     >
       <div className="relative aspect-[3/4] rounded-xl overflow-hidden bg-bg-card">
         {/* Cover image */}
-        <img
-          src={anime.cover}
-          alt={anime.title}
-          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
-          loading="lazy"
-        />
+        {hasCover && (
+          <img
+            src={anime.cover}
+            alt={anime.title}
+            className={`w-full h-full object-cover transition-all duration-500 group-hover:scale-110 ${
+              loaded ? 'opacity-100' : 'opacity-0'
+            }`}
+            loading="lazy"
+            decoding="async"
+            onLoad={() => setLoaded(true)}
+            onError={() => setError(true)}
+          />
+        )}
+
+        {/* Placeholder when no cover, loading or error */}
+        <div
+          className={`absolute inset-0 flex items-center justify-center bg-gradient-to-br from-white/10 to-white/5 transition-opacity duration-300 ${
+            showPlaceholder ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          }`}
+          aria-hidden={!showPlaceholder}
+        >
+          <span className="text-3xl font-bold text-white/30 select-none">
+            {getInitials(anime.title)}
+          </span>
+          <Film className="absolute bottom-2 right-2 w-6 h-6 text-white/20" aria-hidden />
+        </div>
 
         {/* Overlay */}
         <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300">

@@ -4,6 +4,29 @@ const sources = {
   voiranime: new VoiranimeSource(),
 };
 
+// In-memory search cache: { key: { results, at } }
+const searchCache = new Map();
+const SEARCH_CACHE_TTL = 120000; // 2 min
+
+function getSearchCacheKey(source, query) {
+  return `${source}:${query}`;
+}
+
+function getCachedSearch(source, query) {
+  const key = getSearchCacheKey(source, query);
+  const entry = searchCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.at > SEARCH_CACHE_TTL) {
+    searchCache.delete(key);
+    return null;
+  }
+  return entry.results;
+}
+
+function setSearchCache(source, query, results) {
+  searchCache.set(getSearchCacheKey(source, query), { results: [...results], at: Date.now() });
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const { action, payload } = message;
 
@@ -35,8 +58,16 @@ async function handleAction(action, payload, sender) {
 
   switch (action) {
     case "search": {
-      const results = await source.search(payload.query);
+      const query = payload.query ?? "";
+      const cached = getCachedSearch(sourceName, query);
+      if (cached) {
+        console.log(`[ext] search cache HIT (${sourceName}:${query})`);
+        return cached;
+      }
+
+      const results = await source.search(query);
       for (const r of results) r.source = sourceName;
+      setSearchCache(sourceName, query, results);
 
       // Enrich covers in background — send update via content script
       if (sender?.tab?.id) {
