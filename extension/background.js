@@ -69,14 +69,14 @@ async function handleAction(action, payload, sender) {
       for (const r of results) r.source = sourceName;
       setSearchCache(sourceName, query, results);
 
-      // Enrich covers in background — send update via content script
+      // Enrich covers in background — envoie uniquement les covers mises à jour (merge côté frontend)
       if (sender?.tab?.id) {
         const tabId = sender.tab.id;
-        source.enrichCoversAsync(results, (updated) => {
-          for (const r of updated) r.source = sourceName;
+        source.enrichCoversAsync(results, (patches) => {
+          for (const p of patches) p.source = sourceName;
           chrome.tabs.sendMessage(tabId, {
             type: "ANIME_EXT_COVERS_UPDATE",
-            data: updated,
+            data: patches,
           }).catch(() => {});
         });
       }

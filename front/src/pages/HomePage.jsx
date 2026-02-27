@@ -14,10 +14,15 @@ export default function HomePage() {
     loadData();
   }, [selectedSource]);
 
-  // Listen for cover updates from extension (arrives after initial results)
+  // Listen for cover updates — merge uniquement les cartes modifiées (évite re-renders en cascade)
   useEffect(() => {
-    return onCoversUpdate((updated) => {
-      setSearchResults([...updated]);
+    return onCoversUpdate((patches) => {
+      setSearchResults((prev) =>
+        prev.map((a) => {
+          const p = patches.find((x) => x.id === a.id && x.source === a.source);
+          return p ? { ...a, cover: p.cover } : a;
+        })
+      );
     });
   }, []);
 

@@ -136,33 +136,35 @@ export class VoiranimeSource {
   }
 
   /**
-   * Enrich covers from Jikan (always — consistent quality).
-   * Runs in parallel (max 2 concurrent) for faster display.
-   * Throttles UI updates to every 200ms.
+   * Enrich covers via Jikan. onUpdate reçoit uniquement les animes modifiés { id, source, cover }
+   * pour éviter les re-renders en cascade et les rechargements d’images inutiles.
    */
   async enrichCoversAsync(results, onUpdate) {
+    const pending = [];
     let scheduled = null;
+
     const scheduleNotify = () => {
-      if (!onUpdate) return;
+      if (!onUpdate || pending.length === 0) return;
       if (scheduled) return;
       scheduled = setTimeout(() => {
         scheduled = null;
-        onUpdate(results);
-      }, 200);
+        const batch = pending.splice(0, pending.length);
+        onUpdate(batch);
+      }, 150);
     };
 
-    // Fetch all covers in parallel (semaphore limits to 2 concurrent)
     await Promise.all(
       results.map(async (r) => {
-        const cover = await this._fetchCover(r.title);
-        if (cover) {
-          r.cover = cover;
+        const jikanCover = await this._fetchCoverForAnime(r);
+        if (jikanCover) {
+          r.cover = jikanCover;
+          pending.push({ id: r.id, source: r.source, cover: jikanCover });
           scheduleNotify();
         }
       })
     );
     if (scheduled) clearTimeout(scheduled);
-    if (onUpdate) onUpdate(results);
+    if (pending.length > 0 && onUpdate) onUpdate(pending);
   }
 
   _parseSearchResults(html, seenIds, results) {
@@ -187,7 +189,6 @@ export class VoiranimeSource {
         title = stripTags(innerHtml);
       }
 
-      // Cover always from Jikan (enrichCoversAsync) for consistent quality
       if (!title) title = slug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
       results.push({
@@ -287,22 +288,7 @@ export class VoiranimeSource {
         title = stripTags(titleHtml) || title;
       }
 
-      // Cover from Jikan
-      let cover = await this._fetchCover(title);
-
-      // Fallback to scraped cover
-      if (!cover) {
-        const imgMatch = html.match(
-          /(?:summary_image|tab-summary|manga-thumb)[^>]*>[\s\S]*?<img\s([^>]+)>/i
-        );
-        if (imgMatch) {
-          cover =
-            getAttr(imgMatch[0], "data-src") ||
-            getAttr(imgMatch[0], "src") ||
-            getAttr(imgMatch[0], "data-lazy-src") ||
-            "";
-        }
-      }
+      const cover = await this._fetchCoverForAnime({ id: animeId, title });
 
       // Type & year from post-content items
       let animeType = "TV";
@@ -574,17 +560,55 @@ export class VoiranimeSource {
 
   // ── Jikan cover helpers ───────────────────────────────────
 
-  async _enrichCovers(results) {
-    // Sequential with rate limiting to avoid Jikan 429s
-    for (const r of results) {
-      const cover = await this._fetchCover(r.title);
-      if (cover) r.cover = cover;
+  /** Build search terms: titre Voiranime, slug (JP/EN romanisé), noms alternatifs dans le titre */
+  _getJikanSearchTerms(anime) {
+    const terms = new Set();
+    const title = anime.title?.trim() || "";
+    const slug = anime.id || "";
+
+    const cleaned = this._cleanTitle(title).trim();
+    if (cleaned) terms.add(cleaned);
+
+    const slugQuery = slug.replace(/-/g, " ").trim();
+    if (slugQuery && slugQuery.length >= 2) terms.add(slugQuery);
+
+    // Extraire "Titre (Nom original)" ou "Titre – Nom original"
+    const parenMatch = title.match(/\(\s*([^)]{2,80})\s*\)/);
+    if (parenMatch) {
+      const alt = parenMatch[1].trim();
+      if (alt.length >= 2 && !/^\d+$/.test(alt)) terms.add(alt);
     }
+    const dashMatch = title.match(/[-–—]\s*([^-–—]{2,80})$/);
+    if (dashMatch) {
+      const alt = dashMatch[1].trim();
+      if (alt.length >= 2) terms.add(alt);
+    }
+
+    return [...terms];
   }
 
-  async _fetchCover(title) {
-    if (!title?.trim()) return "";
-    const key = this._cleanTitle(title).toLowerCase();
+  async _fetchCoverForAnime(anime) {
+    const cacheKey = `anime:${anime.id}`;
+    const cached = _coverCache[cacheKey];
+    if (cached) {
+      const ttl = cached.cover ? COVER_TTL : COVER_ERROR_TTL;
+      if (Date.now() - cached.at < ttl) return cached.cover;
+    }
+
+    const terms = this._getJikanSearchTerms(anime);
+    for (const q of terms) {
+      const cover = await this._fetchCoverByQuery(q);
+      if (cover) {
+        _coverCache[cacheKey] = { cover, at: Date.now() };
+        return cover;
+      }
+    }
+    _coverCache[cacheKey] = { cover: "", at: Date.now() };
+    return "";
+  }
+
+  async _fetchCoverByQuery(query) {
+    const key = query.toLowerCase().trim();
     if (!key) return "";
 
     const cached = _coverCache[key];
@@ -598,10 +622,7 @@ export class VoiranimeSource {
       const resp = await fetch(
         `${JIKAN_BASE}/anime?q=${encodeURIComponent(key)}&limit=1&sfw=true`
       );
-      if (resp.status === 429) {
-        console.warn(`[voiranime] Jikan 429 for '${key}', will retry later`);
-        return "";
-      }
+      if (resp.status === 429) return "";
       if (!resp.ok) {
         _coverCache[key] = { cover: "", at: Date.now() };
         return "";
@@ -611,12 +632,22 @@ export class VoiranimeSource {
       _coverCache[key] = { cover, at: Date.now() };
       return cover;
     } catch (e) {
-      console.warn(`[voiranime] Cover fetch error for '${key}':`, e.message);
       _coverCache[key] = { cover: "", at: Date.now() };
       return "";
     } finally {
       _jikanRelease();
     }
+  }
+
+  async _enrichCovers(results) {
+    for (const r of results) {
+      const cover = await this._fetchCoverForAnime(r);
+      if (cover) r.cover = cover;
+    }
+  }
+
+  async _fetchCover(title) {
+    return this._fetchCoverByQuery(this._cleanTitle(title || ""));
   }
 
   _cleanTitle(title) {

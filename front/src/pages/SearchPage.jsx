@@ -21,10 +21,15 @@ export default function SearchPage() {
     }
   }, [query, source]);
 
-  // Listen for cover updates
+  // Listen for cover updates — merge ciblé (évite rechargements d’images inutiles)
   useEffect(() => {
-    return onCoversUpdate((updated) => {
-      setResults([...updated]);
+    return onCoversUpdate((patches) => {
+      setResults((prev) =>
+        prev.map((a) => {
+          const p = patches.find((x) => x.id === a.id && x.source === a.source);
+          return p ? { ...a, cover: p.cover } : a;
+        })
+      );
     });
   }, []);
 
