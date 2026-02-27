@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "AnimeHub Source",
+  "version": "1.0.0",
+  "description": "Fournit les sources anime pour AnimeHub",
+  "permissions": [],
+  "host_permissions": [
+    "https://v6.voiranime.com/*",
+    "https://*.vidmoly.to/*",
+    "https://*.vidmoly.biz/*",
+    "https://*.voe.sx/*",
+    "https://*.f16px.com/*",
+    "https://*.streamtape.com/*",
+    "https://api.jikan.moe/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://anime-website-player.onrender.com/*",
+        "http://localhost:3000/*",
+        "http://localhost:8080/*",
+        "http://localhost:8000/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "icons": {}
+}

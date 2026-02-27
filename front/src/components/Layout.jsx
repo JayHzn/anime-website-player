@@ -1,7 +1,7 @@
 import { Outlet, Link, useNavigate } from 'react-router-dom';
-import { Search, Play, Home, Clock, ChevronDown } from 'lucide-react';
+import { Search, Play, Home, Clock, ChevronDown, X, Puzzle } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
-import { api } from '../api';
+import { api, isExtensionAvailable } from '../api';
 
 export default function Layout() {
   const [query, setQuery] = useState('');
@@ -11,8 +11,12 @@ export default function Layout() {
   const dropdownRef = useRef(null);
   const navigate = useNavigate();
 
+  const [extMissing, setExtMissing] = useState(false);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+
   useEffect(() => {
     api.getSources().then(setSources).catch(console.error);
+    isExtensionAvailable().then((ok) => setExtMissing(!ok));
   }, []);
 
   // Close dropdown on outside click
@@ -128,8 +132,26 @@ export default function Layout() {
         </div>
       </nav>
 
+      {/* Extension missing banner */}
+      {extMissing && !bannerDismissed && (
+        <div className="fixed top-16 left-0 right-0 z-40 bg-amber-500/10 border-b border-amber-500/20 backdrop-blur-sm">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2.5 flex items-center gap-3">
+            <Puzzle className="w-4 h-4 text-amber-400 shrink-0" />
+            <p className="text-xs text-amber-200/80 flex-1">
+              L'extension AnimeHub n'est pas détectée. Installez-la pour profiter du site.
+            </p>
+            <button
+              onClick={() => setBannerDismissed(true)}
+              className="p-1 rounded-md text-amber-400/60 hover:text-amber-300 hover:bg-white/5 transition-colors"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Content */}
-      <main className="pt-16">
+      <main className={extMissing && !bannerDismissed ? 'pt-[104px]' : 'pt-16'}>
         <Outlet context={{ selectedSource }} />
       </main>
     </div>

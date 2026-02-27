@@ -1,24 +1,91 @@
 const BASE = import.meta.env.DEV ? '/api' : '';
 
+// ── Extension bridge ────────────────────────────────────────
+
+let _extReady = null; // null = unknown, true/false = detected
+
+/**
+ * Send a request to the Chrome extension via postMessage.
+ */
+function extRequest(action, payload = {}, timeoutMs = 15000) {
+  return new Promise((resolve, reject) => {
+    const id = crypto.randomUUID();
+
+    const timer = setTimeout(() => {
+      window.removeEventListener('message', handler);
+      reject(new Error('Extension non détectée. Installez l\'extension AnimeHub pour utiliser le site.'));
+    }, timeoutMs);
+
+    function handler(event) {
+      if (event.data?.type !== 'ANIME_EXT_RESPONSE') return;
+      if (event.data.id !== id) return;
+      window.removeEventListener('message', handler);
+      clearTimeout(timer);
+      if (event.data.success) {
+        console.log(`%c[EXT] ✓ ${action}`, 'color:#4ade80', event.data.data);
+        resolve(event.data.data);
+      } else {
+        console.warn(`%c[EXT] ✗ ${action}`, 'color:#f87171', event.data.error);
+        reject(new Error(event.data.error || 'Extension error'));
+      }
+    }
+
+    window.addEventListener('message', handler);
+    console.log(`%c[EXT] → ${action}`, 'color:#60a5fa', payload);
+    window.postMessage({ type: 'ANIME_EXT_REQUEST', id, action, payload }, '*');
+  });
+}
+
+/**
+ * Detect extension availability via ping (cached).
+ */
+export async function isExtensionAvailable() {
+  if (_extReady !== null) return _extReady;
+  try {
+    await extRequest('ping', {}, 2000);
+    _extReady = true;
+    console.log('%c[EXT] Extension détectée', 'color:#4ade80;font-weight:bold');
+  } catch {
+    _extReady = false;
+    console.log('%c[EXT] Extension non détectée', 'color:#fbbf24');
+  }
+  return _extReady;
+}
+
+// Reset detection when extension announces itself
+window.addEventListener('message', (e) => {
+  if (e.data?.type === 'ANIME_EXT_READY') {
+    _extReady = true;
+    console.log('%c[EXT] Extension READY reçu', 'color:#4ade80;font-weight:bold');
+  }
+});
+
+// ── Backend helpers ─────────────────────────────────────────
+
 async function fetchJSON(path) {
   const res = await fetch(`${BASE}${path}`);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
 
+// ── Public API ──────────────────────────────────────────────
+
 export const api = {
-  getSources: () => fetchJSON('/sources'),
-  search: (query, source) => {
-    const params = new URLSearchParams({ q: query });
-    if (source) params.append('source', source);
-    return fetchJSON(`/search?${params}`);
-  },
+  // Scraping operations → extension ONLY (no backend fallback)
+  search: (query, source) =>
+    extRequest('search', { query, source: source || 'voiranime' }),
+
   getAnimeInfo: (source, animeId) =>
-    fetchJSON(`/anime/${source}/${encodeURIComponent(animeId)}/info`),
+    extRequest('getAnimeInfo', { animeId, source }),
+
   getEpisodes: (source, animeId) =>
-    fetchJSON(`/anime/${source}/${encodeURIComponent(animeId)}/episodes`),
+    extRequest('getEpisodes', { animeId, source }),
+
   getVideoUrl: (source, episodeId) =>
-    fetchJSON(`/episode/${source}/${episodeId}/video`),
+    extRequest('getVideoUrl', { episodeId, source }),
+
+  // Storage operations → always backend
+  getSources: () => fetchJSON('/sources'),
   getProgress: () => fetchJSON('/progress'),
   getAnimeProgress: (animeId) => fetchJSON(`/progress/${encodeURIComponent(animeId)}`),
   updateProgress: (data) =>
