@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useOutletContext } from 'react-router-dom';
 import { Play, Clock, Trash2 } from 'lucide-react';
-import { api } from '../api';
+import { api, onCoversUpdate } from '../api';
 import AnimeCard from '../components/AnimeCard';
 
 export default function HomePage() {
@@ -13,6 +13,13 @@ export default function HomePage() {
   useEffect(() => {
     loadData();
   }, [selectedSource]);
+
+  // Listen for cover updates from extension (arrives after initial results)
+  useEffect(() => {
+    return onCoversUpdate((updated) => {
+      setSearchResults([...updated]);
+    });
+  }, []);
 
   async function loadData() {
     setLoading(true);

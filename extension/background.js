@@ -9,7 +9,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   console.log(`[ext] → ${action}`, payload);
 
-  handleAction(action, payload)
+  handleAction(action, payload, sender)
     .then((result) => {
       console.log(`[ext] ← ${action} OK`, result);
       sendResponse(result);
@@ -22,7 +22,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true; // keep channel open for async sendResponse
 });
 
-async function handleAction(action, payload) {
+async function handleAction(action, payload, sender) {
   if (action === "ping") {
     return { version: "1.0.0", sources: Object.keys(sources) };
   }
@@ -36,10 +36,20 @@ async function handleAction(action, payload) {
   switch (action) {
     case "search": {
       const results = await source.search(payload.query);
-      // Add source field to each result (backend does this too)
-      for (const r of results) {
-        r.source = sourceName;
+      for (const r of results) r.source = sourceName;
+
+      // Enrich covers in background — send update via content script
+      if (sender?.tab?.id) {
+        const tabId = sender.tab.id;
+        source.enrichCoversAsync(results, (updated) => {
+          for (const r of updated) r.source = sourceName;
+          chrome.tabs.sendMessage(tabId, {
+            type: "ANIME_EXT_COVERS_UPDATE",
+            data: updated,
+          }).catch(() => {});
+        });
       }
+
       return results;
     }
     case "getEpisodes":

@@ -16,6 +16,16 @@ window.addEventListener("load", announceReady);
 setTimeout(announceReady, 500);
 setTimeout(announceReady, 2000);
 
+// Relay background -> page messages (cover updates)
+chrome.runtime.onMessage.addListener((message) => {
+  if (message.type === "ANIME_EXT_COVERS_UPDATE") {
+    window.postMessage({
+      type: "ANIME_EXT_COVERS_UPDATE",
+      data: message.data,
+    }, "*");
+  }
+});
+
 // Relay requests from page -> background service worker
 window.addEventListener("message", (event) => {
   if (event.source !== window) return;

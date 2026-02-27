@@ -60,10 +60,40 @@ window.addEventListener('message', (e) => {
   }
 });
 
+// ── Cover updates listener ──────────────────────────────────
+
+const _coverListeners = new Set();
+
+/** Subscribe to cover updates from the extension. Returns unsubscribe fn. */
+export function onCoversUpdate(callback) {
+  _coverListeners.add(callback);
+  return () => _coverListeners.delete(callback);
+}
+
+window.addEventListener('message', (e) => {
+  if (e.data?.type === 'ANIME_EXT_COVERS_UPDATE') {
+    console.log('%c[EXT] Covers updated', 'color:#4ade80', e.data.data);
+    for (const cb of _coverListeners) cb(e.data.data);
+  }
+});
+
+// ── User ID (per-browser, persisted in localStorage) ────────
+
+function getUserId() {
+  let id = localStorage.getItem('animehub_user_id');
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem('animehub_user_id', id);
+  }
+  return id;
+}
+
+const USER_HEADERS = { 'X-User-Id': getUserId() };
+
 // ── Backend helpers ─────────────────────────────────────────
 
 async function fetchJSON(path) {
-  const res = await fetch(`${BASE}${path}`);
+  const res = await fetch(`${BASE}${path}`, { headers: USER_HEADERS });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
@@ -91,11 +121,11 @@ export const api = {
   updateProgress: (data) =>
     fetch(`${BASE}/progress`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...USER_HEADERS },
       body: JSON.stringify(data),
     }),
   deleteProgress: (animeId) =>
-    fetch(`${BASE}/progress/${encodeURIComponent(animeId)}`, { method: 'DELETE' }),
+    fetch(`${BASE}/progress/${encodeURIComponent(animeId)}`, { method: 'DELETE', headers: USER_HEADERS }),
   getSkipSegments: (source, episodeId, episodeNumber) => {
     const params = episodeNumber ? `?ep=${episodeNumber}` : '';
     return fetchJSON(`/episode/${source}/${episodeId}/skip-segments${params}`);

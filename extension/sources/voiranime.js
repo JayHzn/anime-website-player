@@ -108,8 +108,25 @@ export class VoiranimeSource {
       results.push(...fallback);
     }
 
-    await this._enrichCovers(results);
+    // Return results immediately — covers will be fetched by enrichCoversAsync
     return results;
+  }
+
+  /**
+   * Enrich covers in-place and call onUpdate after each batch.
+   * Called separately from search() so results arrive fast.
+   */
+  async enrichCoversAsync(results, onUpdate) {
+    let changed = false;
+    for (const r of results) {
+      if (r.cover) continue; // already has a cover
+      const cover = await this._fetchCover(r.title);
+      if (cover) {
+        r.cover = cover;
+        changed = true;
+      }
+    }
+    if (changed && onUpdate) onUpdate(results);
   }
 
   _parseSearchResults(html, seenIds, results) {

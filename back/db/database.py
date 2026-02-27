@@ -24,16 +24,44 @@ class Database:
 
     def _init_db(self):
         with self._conn() as conn:
+            # Migrate: if old progress table exists (single PK), recreate with composite PK
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(progress)").fetchall()]
+            if cols and "user_id" not in cols:
+                conn.execute("ALTER TABLE progress RENAME TO progress_old")
+                conn.execute("""
+                    CREATE TABLE progress (
+                        anime_id TEXT NOT NULL,
+                        user_id TEXT NOT NULL DEFAULT 'default',
+                        anime_title TEXT NOT NULL,
+                        anime_cover TEXT,
+                        source TEXT NOT NULL,
+                        episode_number INTEGER NOT NULL DEFAULT 1,
+                        total_episodes INTEGER,
+                        timestamp REAL DEFAULT 0,
+                        updated_at REAL NOT NULL,
+                        PRIMARY KEY (anime_id, user_id)
+                    )
+                """)
+                conn.execute("""
+                    INSERT INTO progress (anime_id, user_id, anime_title, anime_cover, source, episode_number, total_episodes, timestamp, updated_at)
+                    SELECT anime_id, 'default', anime_title, anime_cover, source, episode_number, total_episodes, timestamp, updated_at
+                    FROM progress_old
+                """)
+                conn.execute("DROP TABLE progress_old")
+                conn.commit()
+
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS progress (
-                    anime_id TEXT PRIMARY KEY,
+                    anime_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL DEFAULT 'default',
                     anime_title TEXT NOT NULL,
                     anime_cover TEXT,
                     source TEXT NOT NULL,
                     episode_number INTEGER NOT NULL DEFAULT 1,
                     total_episodes INTEGER,
                     timestamp REAL DEFAULT 0,
-                    updated_at REAL NOT NULL
+                    updated_at REAL NOT NULL,
+                    PRIMARY KEY (anime_id, user_id)
                 )
             """)
             conn.execute("""
@@ -53,17 +81,19 @@ class Database:
             """)
             conn.commit()
 
-    def get_all_progress(self) -> list[dict]:
+    def get_all_progress(self, user_id: str = "default") -> list[dict]:
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT * FROM progress ORDER BY updated_at DESC"
+                "SELECT * FROM progress WHERE user_id = ? ORDER BY updated_at DESC",
+                (user_id,),
             ).fetchall()
             return [dict(r) for r in rows]
 
-    def get_progress(self, anime_id: str) -> dict | None:
+    def get_progress(self, anime_id: str, user_id: str = "default") -> dict | None:
         with self._conn() as conn:
             row = conn.execute(
-                "SELECT * FROM progress WHERE anime_id = ?", (anime_id,)
+                "SELECT * FROM progress WHERE anime_id = ? AND user_id = ?",
+                (anime_id, user_id),
             ).fetchone()
             return dict(row) if row else None
 
@@ -76,27 +106,31 @@ class Database:
         episode_number: int,
         total_episodes: int | None,
         timestamp: float,
+        user_id: str = "default",
     ):
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO progress 
-                    (anime_id, anime_title, anime_cover, source, episode_number, total_episodes, timestamp, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(anime_id) DO UPDATE SET
+                INSERT INTO progress
+                    (anime_id, user_id, anime_title, anime_cover, source, episode_number, total_episodes, timestamp, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(anime_id, user_id) DO UPDATE SET
                     episode_number = excluded.episode_number,
                     total_episodes = excluded.total_episodes,
                     timestamp = excluded.timestamp,
                     anime_cover = excluded.anime_cover,
                     updated_at = excluded.updated_at
                 """,
-                (anime_id, anime_title, anime_cover, source, episode_number, total_episodes, timestamp, time.time()),
+                (anime_id, user_id, anime_title, anime_cover, source, episode_number, total_episodes, timestamp, time.time()),
             )
             conn.commit()
 
-    def delete_progress(self, anime_id: str):
+    def delete_progress(self, anime_id: str, user_id: str = "default"):
         with self._conn() as conn:
-            conn.execute("DELETE FROM progress WHERE anime_id = ?", (anime_id,))
+            conn.execute(
+                "DELETE FROM progress WHERE anime_id = ? AND user_id = ?",
+                (anime_id, user_id),
+            )
             conn.commit()
 
     # --- Skip Segments (OP/ED detection) ---

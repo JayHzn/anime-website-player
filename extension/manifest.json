@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AnimeHub Source",
-  "version": "1.0.0",
+  "version": "1.0.5",
   "description": "Fournit les sources anime pour AnimeHub",
   "permissions": [],
   "host_permissions": [
@@ -29,5 +29,7 @@
       "run_at": "document_start"
     }
   ],
-  "icons": {}
+  "icons": {
+    "48": "icons/icon48.png"
+  }
 }

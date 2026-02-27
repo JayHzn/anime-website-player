@@ -327,23 +327,28 @@ def _rewrite_m3u8(body: str, manifest_url: str, referer: str) -> str:
 
 # --- Progress Tracking ---
 
+def _get_user_id(request: Request) -> str:
+    """Extract user ID from X-User-Id header, fallback to 'default'."""
+    return request.headers.get("x-user-id", "default")[:64]
+
+
 @app.get("/progress")
-def get_all_progress():
+def get_all_progress(request: Request):
     """Get all anime progress (continue watching)."""
-    return db.get_all_progress()
+    return db.get_all_progress(_get_user_id(request))
 
 
 @app.get("/progress/{anime_id}")
-def get_progress(anime_id: str):
+def get_progress(anime_id: str, request: Request):
     """Get progress for a specific anime."""
-    p = db.get_progress(anime_id)
+    p = db.get_progress(anime_id, _get_user_id(request))
     if not p:
         raise HTTPException(404, "No progress found")
     return p
 
 
 @app.post("/progress")
-def update_progress(data: ProgressUpdate):
+def update_progress(data: ProgressUpdate, request: Request):
     """Update watch progress."""
     db.update_progress(
         anime_id=data.anime_id,
@@ -353,14 +358,15 @@ def update_progress(data: ProgressUpdate):
         episode_number=data.episode_number,
         total_episodes=data.total_episodes,
         timestamp=data.timestamp,
+        user_id=_get_user_id(request),
     )
     return {"status": "ok"}
 
 
 @app.delete("/progress/{anime_id}")
-def delete_progress(anime_id: str):
+def delete_progress(anime_id: str, request: Request):
     """Delete progress for an anime."""
-    db.delete_progress(anime_id)
+    db.delete_progress(anime_id, _get_user_id(request))
     return {"status": "ok"}
 
 

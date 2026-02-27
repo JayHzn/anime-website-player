@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Search } from 'lucide-react';
-import { api } from '../api';
+import { api, onCoversUpdate } from '../api';
 import AnimeCard from '../components/AnimeCard';
 
 export default function SearchPage() {
@@ -20,6 +20,13 @@ export default function SearchPage() {
         .finally(() => setLoading(false));
     }
   }, [query, source]);
+
+  // Listen for cover updates
+  useEffect(() => {
+    return onCoversUpdate((updated) => {
+      setResults([...updated]);
+    });
+  }, []);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
