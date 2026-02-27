@@ -1,0 +1,14 @@
+# Fichiers binaires volumineux
+extension/icons/*.exe
+*.exe
+
+# Dependencies
+node_modules/
+
+# Build
+dist/
+build/
+
+# Env
+.env
+.env.local
