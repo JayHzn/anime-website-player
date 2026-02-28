@@ -42,10 +42,11 @@ export default function HomePage() {
     });
   }, []);
 
-  // Retry missing covers every 2s until all catalogue covers loaded
+  // Retry missing covers every 2s until all covers loaded (catalogue + carousel)
   useEffect(() => {
     const timer = setInterval(() => {
-      const missing = searchResults.filter((a) => !a.cover?.trim());
+      const allItems = [...searchResults, ...latestEpisodes];
+      const missing = allItems.filter((a) => !a.cover?.trim());
       if (missing.length === 0) return;
 
       const unique = [];
@@ -60,7 +61,7 @@ export default function HomePage() {
       }
     }, 2000);
     return () => clearInterval(timer);
-  }, [searchResults, selectedSource]);
+  }, [searchResults, latestEpisodes, selectedSource]);
 
   async function loadData() {
     setLoading(true);

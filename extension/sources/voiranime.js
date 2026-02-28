@@ -19,14 +19,78 @@ const HEADERS = {
 
 const HOST_PRIORITY = ["vidmoly", "voe", "f16px", "streamtape", "mail.ru"];
 
-// In-memory cover cache
-const _coverCache = {};
-const COVER_TTL = 86400000; // 24h
+// Cover cache: in-memory (fast) + IndexedDB (persistent across sessions)
+const _memCache = {};
+const COVER_TTL = 86400000 * 7; // 7 days for successful covers
 const COVER_ERROR_TTL = 10000; // 10s for errors (retry quickly)
+const DB_NAME = "animehub_covers";
+const DB_STORE = "covers";
+let _db = null;
 
-// Jikan: max 2 concurrent, 400ms between batch starts
-const JIKAN_CONCURRENCY = 2;
-const JIKAN_DELAY_MS = 400;
+async function _openDB() {
+  if (_db) return _db;
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(DB_STORE)) {
+        db.createObjectStore(DB_STORE, { keyPath: "key" });
+      }
+    };
+    req.onsuccess = () => { _db = req.result; resolve(_db); };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function _dbGet(key) {
+  try {
+    const db = await _openDB();
+    return new Promise((resolve) => {
+      const tx = db.transaction(DB_STORE, "readonly");
+      const req = tx.objectStore(DB_STORE).get(key);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => resolve(null);
+    });
+  } catch { return null; }
+}
+
+async function _dbSet(key, cover) {
+  try {
+    const db = await _openDB();
+    const tx = db.transaction(DB_STORE, "readwrite");
+    tx.objectStore(DB_STORE).put({ key, cover, at: Date.now() });
+  } catch { /* ignore */ }
+}
+
+async function _cacheGet(key) {
+  // 1. In-memory (instant)
+  const mem = _memCache[key];
+  if (mem) {
+    const ttl = mem.cover ? COVER_TTL : COVER_ERROR_TTL;
+    if (Date.now() - mem.at < ttl) return mem;
+  }
+  // 2. IndexedDB (persistent)
+  const stored = await _dbGet(key);
+  if (stored) {
+    const ttl = stored.cover ? COVER_TTL : COVER_ERROR_TTL;
+    if (Date.now() - stored.at < ttl) {
+      _memCache[key] = stored; // promote to memory
+      return stored;
+    }
+  }
+  return null;
+}
+
+function _cacheSet(key, cover) {
+  const entry = { key, cover, at: Date.now() };
+  _memCache[key] = entry;
+  // Only persist successful covers to IndexedDB (not errors)
+  if (cover) _dbSet(key, cover);
+}
+
+// Jikan: max 3 concurrent, 200ms between starts (Jikan allows 3 req/s)
+const JIKAN_CONCURRENCY = 3;
+const JIKAN_DELAY_MS = 200;
 let _jikanInFlight = 0;
 let _jikanLastStart = 0;
 
@@ -150,7 +214,7 @@ export class VoiranimeSource {
         scheduled = null;
         const batch = pending.splice(0, pending.length);
         onUpdate(batch);
-      }, 150);
+      }, 50);
     };
 
     await Promise.all(
@@ -654,21 +718,18 @@ export class VoiranimeSource {
 
   async _fetchCoverForAnime(anime) {
     const cacheKey = `anime:${anime.id}`;
-    const cached = _coverCache[cacheKey];
-    if (cached) {
-      const ttl = cached.cover ? COVER_TTL : COVER_ERROR_TTL;
-      if (Date.now() - cached.at < ttl) return cached.cover;
-    }
+    const cached = await _cacheGet(cacheKey);
+    if (cached) return cached.cover;
 
     const terms = this._getJikanSearchTerms(anime);
     for (const q of terms) {
       const cover = await this._fetchCoverByQuery(q);
       if (cover) {
-        _coverCache[cacheKey] = { cover, at: Date.now() };
+        _cacheSet(cacheKey, cover);
         return cover;
       }
     }
-    _coverCache[cacheKey] = { cover: "", at: Date.now() };
+    _cacheSet(cacheKey, "");
     return "";
   }
 
@@ -676,11 +737,8 @@ export class VoiranimeSource {
     const key = query.toLowerCase().trim();
     if (!key) return "";
 
-    const cached = _coverCache[key];
-    if (cached) {
-      const ttl = cached.cover ? COVER_TTL : COVER_ERROR_TTL;
-      if (Date.now() - cached.at < ttl) return cached.cover;
-    }
+    const cached = await _cacheGet(key);
+    if (cached) return cached.cover;
 
     await _jikanAcquire();
     try {
@@ -689,15 +747,15 @@ export class VoiranimeSource {
       );
       if (resp.status === 429) return "";
       if (!resp.ok) {
-        _coverCache[key] = { cover: "", at: Date.now() };
+        _cacheSet(key, "");
         return "";
       }
       const data = await resp.json();
       const cover = data.data?.[0]?.images?.jpg?.large_image_url || "";
-      _coverCache[key] = { cover, at: Date.now() };
+      _cacheSet(key, cover);
       return cover;
     } catch (e) {
-      _coverCache[key] = { cover: "", at: Date.now() };
+      _cacheSet(key, "");
       return "";
     } finally {
       _jikanRelease();
