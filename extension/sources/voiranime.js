@@ -236,6 +236,75 @@ export class VoiranimeSource {
     }
   }
 
+  // ── Latest episodes (homepage scrape) ─────────────────────
+
+  async getLatestEpisodes() {
+    try {
+      const resp = await fetch(BASE + "/", { headers: HEADERS });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const html = await resp.text();
+
+      const results = [];
+      const seenIds = new Set();
+
+      // Each anime card is inside <div class="page-item-detail">
+      const cardRegex = /class\s*=\s*["'][^"']*page-item-detail[^"']*["'][^>]*>([\s\S]*?)(?=<div[^>]*class\s*=\s*["'][^"']*page-item-detail|$)/gi;
+      let cardMatch;
+      while ((cardMatch = cardRegex.exec(html)) !== null) {
+        const card = cardMatch[1];
+
+        // Image from item-thumb
+        const imgMatch = card.match(/class\s*=\s*["'][^"']*item-thumb[^"']*["'][\s\S]*?<img[^>]*src\s*=\s*["']([^"']+)["']/i);
+        const thumbUrl = imgMatch ? imgMatch[1] : "";
+
+        // Anime link and title from post-title
+        const titleMatch = card.match(/class\s*=\s*["'][^"']*post-title[^"']*["'][^>]*>[\s\S]*?<a\s[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i);
+        if (!titleMatch) continue;
+
+        const animeUrl = decodeEntities(titleMatch[1]);
+        const title = decodeEntities(stripTags(titleMatch[2]));
+        const slug = this._slugFromUrl(animeUrl);
+        if (!slug || seenIds.has(slug)) continue;
+        seenIds.add(slug);
+
+        // Latest episode link from list-chapter or chapter
+        let latestEpNumber = null;
+        let latestEpId = null;
+        const chapterMatch = card.match(/class\s*=\s*["'][^"']*(?:list-chapter|chapter)[^"']*["'][\s\S]*?<a\s[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i);
+        if (chapterMatch) {
+          const epHref = decodeEntities(chapterMatch[1]);
+          const epText = stripTags(chapterMatch[2]);
+          latestEpNumber = this._extractEpisodeNumber(epText, epHref);
+          latestEpId = this._episodeIdFromUrl(epHref);
+        }
+
+        // Rating
+        let rating = null;
+        const ratingMatch = card.match(/class\s*=\s*["'][^"']*(?:total_votes|score|rating)[^"']*["'][^>]*>([\s\S]*?)<\//i);
+        if (ratingMatch) {
+          const num = parseFloat(stripTags(ratingMatch[1]));
+          if (!isNaN(num)) rating = num;
+        }
+
+        results.push({
+          id: slug,
+          title,
+          cover: thumbUrl, // voiranime's own thumbnail
+          type: "TV",
+          year: null,
+          rating,
+          latestEpisode: latestEpNumber,
+          latestEpisodeId: latestEpId,
+        });
+      }
+
+      return results;
+    } catch (e) {
+      console.error("[voiranime] Error fetching latest episodes:", e);
+      return [];
+    }
+  }
+
   // ── Episodes ──────────────────────────────────────────────
 
   async getEpisodes(animeId) {

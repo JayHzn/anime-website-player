@@ -90,6 +90,11 @@ async function handleAction(action, payload, sender) {
       if (info) info.source = sourceName;
       return info;
     }
+    case "getLatestEpisodes": {
+      const latest = await source.getLatestEpisodes();
+      for (const r of latest) r.source = sourceName;
+      return latest;
+    }
     case "getVideoUrl":
       return await source.getVideoUrl(payload.episodeId);
     default:

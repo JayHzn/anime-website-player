@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link, useOutletContext } from 'react-router-dom';
-import { Play, Clock, Trash2 } from 'lucide-react';
+import { Play, Clock, Trash2, ChevronLeft, ChevronRight, Flame } from 'lucide-react';
 import { api, onCoversUpdate } from '../api';
 import AnimeCard from '../components/AnimeCard';
 
@@ -8,7 +8,9 @@ export default function HomePage() {
   const { selectedSource } = useOutletContext();
   const [progress, setProgress] = useState([]);
   const [searchResults, setSearchResults] = useState([]);
+  const [latestEpisodes, setLatestEpisodes] = useState([]);
   const [loading, setLoading] = useState(true);
+  const carouselRef = useRef(null);
 
   useEffect(() => {
     loadData();
@@ -29,12 +31,14 @@ export default function HomePage() {
   async function loadData() {
     setLoading(true);
     try {
-      const [prog, results] = await Promise.all([
+      const [prog, results, latest] = await Promise.all([
         api.getProgress(),
         api.search('', selectedSource),
+        api.getLatestEpisodes(selectedSource).catch(() => []),
       ]);
       setProgress(prog);
       setSearchResults(results);
+      setLatestEpisodes(latest);
     } catch (e) {
       console.error(e);
     } finally {
@@ -115,6 +119,79 @@ export default function HomePage() {
                   </div>
                 </div>
               </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Latest Episodes Carousel */}
+      {latestEpisodes.length > 0 && (
+        <section className="mb-12">
+          <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center gap-2">
+              <Flame className="w-5 h-5 text-orange-400" />
+              <h2 className="font-display font-bold text-xl text-white">Derniers épisodes</h2>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => carouselRef.current?.scrollBy({ left: -300, behavior: 'smooth' })}
+                className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 transition text-white/60 hover:text-white"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => carouselRef.current?.scrollBy({ left: 300, behavior: 'smooth' })}
+                className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 transition text-white/60 hover:text-white"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+          <div
+            ref={carouselRef}
+            className="flex gap-4 overflow-x-auto scrollbar-hide pb-2 snap-x snap-mandatory"
+            style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+          >
+            {latestEpisodes.map((anime) => (
+              <Link
+                key={`latest-${anime.id}`}
+                to={`/anime/${anime.source}/${encodeURIComponent(anime.id)}`}
+                className="flex-shrink-0 w-44 snap-start group"
+              >
+                <div className="relative aspect-[3/4] rounded-xl overflow-hidden bg-bg-card">
+                  {anime.cover ? (
+                    <img
+                      src={anime.cover}
+                      alt={anime.title}
+                      className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div className="w-full h-full bg-gradient-to-br from-white/10 to-white/5 flex items-center justify-center">
+                      <span className="text-2xl font-bold text-white/30">
+                        {anime.title?.slice(0, 2).toUpperCase()}
+                      </span>
+                    </div>
+                  )}
+                  {/* Episode badge */}
+                  {anime.latestEpisode && (
+                    <div className="absolute bottom-2 left-2 bg-accent-primary/90 backdrop-blur-sm text-white text-[11px] font-bold px-2 py-0.5 rounded-md">
+                      Ep. {anime.latestEpisode}
+                    </div>
+                  )}
+                  {/* Rating badge */}
+                  {anime.rating && (
+                    <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm text-yellow-400 text-[10px] font-semibold px-1.5 py-0.5 rounded-md">
+                      ★ {anime.rating}
+                    </div>
+                  )}
+                  {/* Hover overlay */}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                </div>
+                <p className="mt-2 text-xs font-medium text-white/80 line-clamp-2 group-hover:text-accent-primary transition-colors">
+                  {anime.title}
+                </p>
+              </Link>
             ))}
           </div>
         </section>

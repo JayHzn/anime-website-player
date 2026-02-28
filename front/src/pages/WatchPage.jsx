@@ -27,6 +27,8 @@ export default function WatchPage() {
   const currentIndex = animeCtx.episodes?.findIndex(
     (e) => e.id === episodeId
   );
+  const prevEpisode =
+    currentIndex > 0 ? animeCtx.episodes[currentIndex - 1] : null;
   const nextEpisode =
     currentIndex >= 0 && currentIndex < (animeCtx.episodes?.length || 0) - 1
       ? animeCtx.episodes[currentIndex + 1]
@@ -100,6 +102,13 @@ export default function WatchPage() {
     },
     [animeCtx, currentEpisode]
   );
+
+  // Go to previous episode
+  const handlePrevious = useCallback(() => {
+    if (prevEpisode) {
+      navigate(`/watch/${source}/${prevEpisode.id}`, { replace: true });
+    }
+  }, [prevEpisode, source, navigate]);
 
   // Autoplay next episode
   const handleEnded = useCallback(() => {
@@ -213,6 +222,7 @@ export default function WatchPage() {
         animeTitle={animeCtx.title || 'Anime'}
         onTimeUpdate={handleTimeUpdate}
         onEnded={nextEpisode ? handleEnded : null}
+        onPrevious={prevEpisode ? handlePrevious : null}
         onBack={handleBack}
         autoplayNext={true}
         skipSegments={skipSegments}

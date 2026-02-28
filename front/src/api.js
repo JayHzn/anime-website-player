@@ -114,6 +114,9 @@ export const api = {
   getVideoUrl: (source, episodeId) =>
     extRequest('getVideoUrl', { episodeId, source }),
 
+  getLatestEpisodes: (source) =>
+    extRequest('getLatestEpisodes', { source: source || 'voiranime' }),
+
   // Storage operations → always backend
   getSources: () => fetchJSON('/sources'),
   getProgress: () => fetchJSON('/progress'),

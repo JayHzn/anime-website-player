@@ -11,6 +11,7 @@ export default function VideoPlayer({
   animeTitle,
   onTimeUpdate,
   onEnded,
+  onPrevious,
   onBack,
   initialTime = 0,
   autoplayNext = true,
@@ -257,6 +258,15 @@ export default function VideoPlayer({
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {onPrevious && (
+              <button
+                onClick={onPrevious}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 transition text-xs text-white font-medium"
+              >
+                <SkipBack className="w-3.5 h-3.5" />
+                Précédent
+              </button>
+            )}
             {onEnded && (
               <button
                 onClick={onEnded}
@@ -305,6 +315,15 @@ export default function VideoPlayer({
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {onPrevious && (
+              <button
+                onClick={onPrevious}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 transition text-xs text-white font-medium"
+              >
+                <SkipBack className="w-3.5 h-3.5" />
+                Précédent
+              </button>
+            )}
             {onEnded && (
               <button
                 onClick={onEnded}
@@ -334,6 +353,7 @@ export default function VideoPlayer({
     <div
       ref={containerRef}
       className="relative w-full h-full bg-black group video-container"
+      style={{ cursor: showControls ? 'default' : 'none' }}
       onMouseMove={resetHideTimer}
       onClick={(e) => {
         if (e.target === videoRef.current || e.target.closest('.video-overlay')) {
@@ -608,6 +628,16 @@ export default function VideoPlayer({
             </div>
 
             <div className="flex items-center gap-2">
+              {/* Previous episode */}
+              {onPrevious && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onPrevious(); }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 transition text-xs text-white font-medium"
+                >
+                  <SkipBack className="w-3.5 h-3.5" />
+                  Précédent
+                </button>
+              )}
               {/* Next episode */}
               {onEnded && (
                 <button

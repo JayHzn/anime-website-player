@@ -91,3 +91,8 @@ body {
 .animate-slide-in-right {
     animation: slideInRight 0.3s ease-out forwards;
 }
+
+/* Hide scrollbar for carousel */
+.scrollbar-hide::-webkit-scrollbar {
+    display: none;
+}
