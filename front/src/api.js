@@ -117,6 +117,9 @@ export const api = {
   getLatestEpisodes: (source) =>
     extRequest('getLatestEpisodes', { source: source || 'voiranime' }),
 
+  retryCovers: (items, source) =>
+    extRequest('retryCovers', { items, source: source || 'voiranime' }),
+
   // Storage operations → always backend
   getSources: () => fetchJSON('/sources'),
   getProgress: () => fetchJSON('/progress'),

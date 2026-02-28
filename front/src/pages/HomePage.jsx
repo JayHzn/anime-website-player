@@ -18,7 +18,7 @@ export default function HomePage() {
     loadData();
   }, [selectedSource]);
 
-  // Listen for cover updates — merge uniquement les cartes modifiées (évite re-renders en cascade)
+  // Listen for cover updates — merge into both catalogue AND carousel
   useEffect(() => {
     return onCoversUpdate((patches) => {
       setSearchResults((prev) =>
@@ -27,8 +27,41 @@ export default function HomePage() {
           return p ? { ...a, cover: p.cover } : a;
         })
       );
+      setLatestEpisodes((prev) =>
+        prev.map((a) => {
+          const p = patches.find((x) => x.id === a.id && x.source === a.source);
+          return p ? { ...a, cover: p.cover } : a;
+        })
+      );
+      // Clear image errors for covers that just got updated
+      setImgErrors((prev) => {
+        const updated = new Set(prev);
+        for (const p of patches) updated.delete(p.id);
+        return updated.size !== prev.size ? updated : prev;
+      });
     });
   }, []);
+
+  // Retry missing covers every 30s until all loaded
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const allAnimes = [...searchResults, ...latestEpisodes];
+      const missing = allAnimes.filter((a) => !a.cover?.trim());
+      if (missing.length === 0) return;
+
+      const unique = [];
+      const seen = new Set();
+      for (const a of missing) {
+        if (seen.has(a.id)) continue;
+        seen.add(a.id);
+        unique.push({ id: a.id, title: a.title, source: a.source });
+      }
+      if (unique.length > 0) {
+        api.retryCovers(unique, selectedSource).catch(() => {});
+      }
+    }, 30000);
+    return () => clearInterval(timer);
+  }, [searchResults, latestEpisodes, selectedSource]);
 
   async function loadData() {
     setLoading(true);
