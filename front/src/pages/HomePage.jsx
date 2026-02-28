@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useOutletContext, useNavigate } from 'react-router-dom';
-import { Play, Clock, Trash2, ChevronLeft, ChevronRight, Flame, Film } from 'lucide-react';
+import { Play, Clock, Trash2, ChevronLeft, ChevronRight, Flame, Film, Sparkles } from 'lucide-react';
 import { api, onCoversUpdate } from '../api';
-import AnimeCard from '../components/AnimeCard';
+
 
 export default function HomePage() {
   const { selectedSource } = useOutletContext();
@@ -10,6 +10,7 @@ export default function HomePage() {
   const [progress, setProgress] = useState([]);
   const [searchResults, setSearchResults] = useState([]);
   const [latestEpisodes, setLatestEpisodes] = useState([]);
+  const [seasonAnime, setSeasonAnime] = useState([]);
   const [loading, setLoading] = useState(true);
   const [imgErrors, setImgErrors] = useState(new Set());
   const carouselRef = useRef(null);
@@ -66,14 +67,16 @@ export default function HomePage() {
   async function loadData() {
     setLoading(true);
     try {
-      const [prog, results, latest] = await Promise.all([
+      const [prog, results, latest, season] = await Promise.all([
         api.getProgress(),
         api.search('', selectedSource),
         api.getLatestEpisodes(selectedSource).catch(() => []),
+        api.getSeasonAnime().catch(() => []),
       ]);
       setProgress(prog);
       setSearchResults(results);
       setLatestEpisodes(latest);
+      setSeasonAnime(season);
     } catch (e) {
       console.error(e);
     } finally {
@@ -165,7 +168,7 @@ export default function HomePage() {
           <div className="flex items-center justify-between mb-5">
             <div className="flex items-center gap-2">
               <Flame className="w-5 h-5 text-orange-400" />
-              <h2 className="font-display font-bold text-xl text-white">Derniers épisodes</h2>
+              <h2 className="font-display font-bold text-xl text-white">Dernières sorties</h2>
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -269,25 +272,70 @@ export default function HomePage() {
         </section>
       )}
 
-      {/* Browse / Catalogue */}
+      {/* Season Anime */}
       <section>
-        <h2 className="font-display font-bold text-xl text-white mb-5">
-          Catalogue
-        </h2>
+        <div className="flex items-center gap-2 mb-5">
+          <Sparkles className="w-5 h-5 text-purple-400" />
+          <h2 className="font-display font-bold text-xl text-white">Animes de la saison</h2>
+        </div>
         {loading ? (
           <div className="flex items-center justify-center py-20">
             <div className="w-8 h-8 border-2 border-white/10 border-t-accent-primary rounded-full animate-spin" />
           </div>
-        ) : searchResults.length > 0 ? (
+        ) : seasonAnime.length > 0 ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-5">
-            {searchResults.map((anime, i) => (
-              <AnimeCard key={`${anime.source}-${anime.id}`} anime={anime} index={i} />
-            ))}
+            {seasonAnime.map((anime, i) => {
+              const hasCover = Boolean(anime.cover?.trim()) && !imgErrors.has(anime.id);
+              return (
+                <div
+                  key={anime.id}
+                  className={`group block animate-fade-up animate-fade-up-delay-${(i % 4) + 1}`}
+                >
+                  <div className="relative aspect-[3/4] rounded-xl overflow-hidden bg-bg-card">
+                    {hasCover && (
+                      <img
+                        src={anime.cover}
+                        alt={anime.title}
+                        className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
+                        loading="lazy"
+                        decoding="async"
+                        referrerPolicy="no-referrer"
+                        onError={() => setImgErrors((prev) => new Set(prev).add(anime.id))}
+                      />
+                    )}
+                    {!hasCover && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-white/10 to-white/5">
+                        <span className="text-3xl font-bold text-white/30 select-none">
+                          {anime.title?.split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?'}
+                        </span>
+                        <Film className="absolute bottom-2 right-2 w-5 h-5 text-white/20" />
+                      </div>
+                    )}
+                    {/* Score badge */}
+                    {anime.score && (
+                      <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm text-yellow-400 text-[10px] font-semibold px-1.5 py-0.5 rounded-md">
+                        ★ {anime.score}
+                      </div>
+                    )}
+                    {/* Episodes badge */}
+                    {anime.episodes && (
+                      <div className="absolute bottom-2 left-2 bg-black/60 backdrop-blur-sm text-white/80 text-[10px] font-semibold px-1.5 py-0.5 rounded-md">
+                        {anime.episodes} ep.
+                      </div>
+                    )}
+                  </div>
+                  <div className="mt-2.5 px-0.5">
+                    <h3 className="font-display font-semibold text-sm text-white/90 leading-tight line-clamp-2">
+                      {anime.title}
+                    </h3>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         ) : (
           <div className="text-center py-20 text-white/30">
-            <p className="font-display text-lg">Aucun anime trouvé</p>
-            <p className="text-sm mt-1">Essaie de chercher quelque chose !</p>
+            <p className="font-display text-lg">Aucun anime de saison trouvé</p>
           </div>
         )}
       </section>

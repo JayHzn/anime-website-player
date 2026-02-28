@@ -113,6 +113,8 @@ async function handleAction(action, payload, sender) {
       }
       return { status: "retrying", count: items.length };
     }
+    case "getSeasonAnime":
+      return await source.getSeasonAnime();
     case "getVideoUrl":
       return await source.getVideoUrl(payload.episodeId);
     default:

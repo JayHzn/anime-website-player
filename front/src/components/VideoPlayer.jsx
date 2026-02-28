@@ -207,6 +207,7 @@ export default function VideoPlayer({
     const video = videoRef.current;
     if (!video) return;
     video.paused ? video.play() : video.pause();
+    resetHideTimer();
   };
 
   const toggleFullscreen = () => {
@@ -217,6 +218,7 @@ export default function VideoPlayer({
       document.exitFullscreen();
       setIsFullscreen(false);
     }
+    resetHideTimer();
   };
 
   const formatTime = (t) => {
@@ -232,6 +234,7 @@ export default function VideoPlayer({
     if (videoRef.current) {
       videoRef.current.currentTime = pct * duration;
     }
+    resetHideTimer();
   };
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;

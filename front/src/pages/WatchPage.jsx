@@ -21,6 +21,7 @@ export default function WatchPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [skipSegments, setSkipSegments] = useState(null);
+  const [savedTime, setSavedTime] = useState(0);
 
   // Get anime context from sessionStorage
   const [animeCtx] = useState(() => {
@@ -46,6 +47,14 @@ export default function WatchPage() {
 
   useEffect(() => {
     loadVideo();
+    // Fetch saved timestamp for this anime
+    if (animeCtx.animeId) {
+      api.getAnimeProgress(animeCtx.animeId)
+        .then((p) => {
+          if (p?.timestamp > 0) setSavedTime(p.timestamp);
+        })
+        .catch(() => {});
+    }
   }, [source, episodeId]);
 
   // Skip segments polling with proper cleanup
@@ -97,20 +106,21 @@ export default function WatchPage() {
   }
 
   // Save progress
+  const epNumber = currentEpisode?.number || animeCtx.episodeNumber || extractEpisodeNumber(episodeId);
   const handleTimeUpdate = useCallback(
     (time) => {
-      if (!animeCtx.animeId || !currentEpisode) return;
+      if (!animeCtx.animeId) return;
       api.updateProgress({
         anime_id: animeCtx.animeId,
         anime_title: animeCtx.title,
         anime_cover: animeCtx.cover,
         source: animeCtx.source,
-        episode_number: currentEpisode.number,
+        episode_number: epNumber,
         total_episodes: animeCtx.totalEpisodes,
         timestamp: time,
       });
     },
-    [animeCtx, currentEpisode]
+    [animeCtx, epNumber]
   );
 
   // Go to previous episode
@@ -230,6 +240,7 @@ export default function WatchPage() {
         videoData={videoData}
         episodeNumber={currentEpisode?.number || animeCtx.episodeNumber || extractEpisodeNumber(episodeId)}
         animeTitle={animeCtx.title || 'Anime'}
+        initialTime={savedTime}
         onTimeUpdate={handleTimeUpdate}
         onEnded={nextEpisode ? handleEnded : null}
         onPrevious={prevEpisode ? handlePrevious : null}

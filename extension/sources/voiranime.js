@@ -365,6 +365,29 @@ export class VoiranimeSource {
     }
   }
 
+  // ── Current season anime (Jikan) ─────────────────────────
+
+  async getSeasonAnime() {
+    try {
+      const resp = await fetch(`${JIKAN_BASE}/seasons/now?limit=25&sfw=true`);
+      if (!resp.ok) return [];
+      const data = await resp.json();
+      return (data.data || []).map((a) => ({
+        id: `jikan-${a.mal_id}`,
+        title: a.title || a.title_english || '',
+        cover: a.images?.jpg?.large_image_url || '',
+        source: 'jikan',
+        score: a.score || null,
+        episodes: a.episodes || null,
+        status: a.status || '',
+        synopsis: a.synopsis || '',
+      }));
+    } catch (e) {
+      console.error("[voiranime] Error fetching season anime:", e);
+      return [];
+    }
+  }
+
   // ── Episodes ──────────────────────────────────────────────
 
   async getEpisodes(animeId) {

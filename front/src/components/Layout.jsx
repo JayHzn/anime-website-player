@@ -49,12 +49,12 @@ export default function Layout() {
       <nav className="fixed top-0 left-0 right-0 z-50 bg-bg-primary/80 backdrop-blur-xl border-b border-white/5">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center gap-4">
           {/* Logo */}
-          <Link to="/" className="flex items-center gap-2 shrink-0">
-            <div className="w-8 h-8 bg-accent-primary rounded-lg flex items-center justify-center">
-              <Play className="w-4 h-4 text-white fill-white" />
+          <Link to="/" className="flex items-center gap-2.5 shrink-0 group">
+            <div className="w-9 h-9 bg-gradient-to-br from-accent-primary to-red-600 rounded-xl flex items-center justify-center shadow-lg shadow-accent-primary/20 group-hover:shadow-accent-primary/40 transition-shadow">
+              <Play className="w-4.5 h-4.5 text-white fill-white ml-0.5" />
             </div>
             <span className="font-display font-bold text-lg text-white tracking-tight hidden sm:block">
-              AnimeHub
+              Anime<span className="text-accent-primary">Hub</span>
             </span>
           </Link>
 

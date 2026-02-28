@@ -117,6 +117,9 @@ export const api = {
   getLatestEpisodes: (source) =>
     extRequest('getLatestEpisodes', { source: source || 'voiranime' }),
 
+  getSeasonAnime: () =>
+    extRequest('getSeasonAnime', {}),
+
   retryCovers: (items, source) =>
     extRequest('retryCovers', { items, source: source || 'voiranime' }),
 
