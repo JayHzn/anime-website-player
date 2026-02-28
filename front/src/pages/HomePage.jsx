@@ -84,6 +84,18 @@ export default function HomePage() {
     }
   }
 
+  async function goToSeasonAnime(anime) {
+    try {
+      const results = await api.search(anime.title, selectedSource || 'voiranime');
+      if (results.length > 0) {
+        navigate(`/anime/${results[0].source}/${encodeURIComponent(results[0].id)}`);
+      }
+    } catch {
+      // fallback: search page
+      navigate(`/search?q=${encodeURIComponent(anime.title)}`);
+    }
+  }
+
   async function removeProgress(animeId) {
     await api.deleteProgress(animeId);
     setProgress((p) => p.filter((x) => x.anime_id !== animeId));
@@ -289,7 +301,8 @@ export default function HomePage() {
               return (
                 <div
                   key={anime.id}
-                  className={`group block animate-fade-up animate-fade-up-delay-${(i % 4) + 1}`}
+                  onClick={() => goToSeasonAnime(anime)}
+                  className={`group block animate-fade-up animate-fade-up-delay-${(i % 4) + 1} cursor-pointer`}
                 >
                   <div className="relative aspect-[3/4] rounded-xl overflow-hidden bg-bg-card">
                     {hasCover && (
@@ -318,14 +331,20 @@ export default function HomePage() {
                       </div>
                     )}
                     {/* Episodes badge */}
-                    {anime.episodes && (
+                    {(anime.airedEpisodes || anime.episodes) && (
                       <div className="absolute bottom-2 left-2 bg-black/60 backdrop-blur-sm text-white/80 text-[10px] font-semibold px-1.5 py-0.5 rounded-md">
-                        {anime.episodes} ep.
+                        {anime.airedEpisodes ? `${anime.airedEpisodes}` : ''}{anime.airedEpisodes && anime.episodes ? ' / ' : ''}{anime.episodes ? `${anime.episodes}` : ''} ep.
                       </div>
                     )}
+                    {/* Hover overlay */}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+                      <div className="w-10 h-10 rounded-full bg-accent-primary/90 flex items-center justify-center shadow-lg">
+                        <Play className="w-5 h-5 text-white fill-white ml-0.5" />
+                      </div>
+                    </div>
                   </div>
                   <div className="mt-2.5 px-0.5">
-                    <h3 className="font-display font-semibold text-sm text-white/90 leading-tight line-clamp-2">
+                    <h3 className="font-display font-semibold text-sm text-white/90 leading-tight line-clamp-2 group-hover:text-accent-primary transition-colors">
                       {anime.title}
                     </h3>
                   </div>

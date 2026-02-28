@@ -372,16 +372,21 @@ export class VoiranimeSource {
       const resp = await fetch(`${JIKAN_BASE}/seasons/now?limit=25&sfw=true`);
       if (!resp.ok) return [];
       const data = await resp.json();
-      return (data.data || []).map((a) => ({
-        id: `jikan-${a.mal_id}`,
-        title: a.title || a.title_english || '',
-        cover: a.images?.jpg?.large_image_url || '',
-        source: 'jikan',
-        score: a.score || null,
-        episodes: a.episodes || null,
-        status: a.status || '',
-        synopsis: a.synopsis || '',
-      }));
+      return (data.data || []).map((a) => {
+        // Count aired episodes from broadcast info
+        const airedEpisodes = a.episodes_aired || null;
+        return {
+          id: `jikan-${a.mal_id}`,
+          title: a.title || a.title_english || '',
+          cover: a.images?.jpg?.large_image_url || '',
+          source: 'jikan',
+          score: a.score || null,
+          episodes: a.episodes || null,
+          airedEpisodes,
+          status: a.status || '',
+          synopsis: a.synopsis || '',
+        };
+      });
     } catch (e) {
       console.error("[voiranime] Error fetching season anime:", e);
       return [];
