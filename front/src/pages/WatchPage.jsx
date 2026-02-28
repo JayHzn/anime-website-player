@@ -3,6 +3,16 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import VideoPlayer from '../components/VideoPlayer';
 
+/** Extract episode number from an episode ID like "anime-slug/anime-slug-10-vostfr" */
+function extractEpisodeNumber(epId) {
+  if (!epId) return '?';
+  const m = epId.match(/-(\d{1,4})-(?:vostfr|vf)/i);
+  if (m) return parseInt(m[1], 10);
+  const nums = epId.match(/\d+/g);
+  if (nums) return parseInt(nums[nums.length - 1], 10);
+  return '?';
+}
+
 export default function WatchPage() {
   const { source, '*': episodeId } = useParams();
   const navigate = useNavigate();
@@ -218,7 +228,7 @@ export default function WatchPage() {
     <div className="h-screen w-screen bg-black">
       <VideoPlayer
         videoData={videoData}
-        episodeNumber={currentEpisode?.number || '?'}
+        episodeNumber={currentEpisode?.number || animeCtx.episodeNumber || extractEpisodeNumber(episodeId)}
         animeTitle={animeCtx.title || 'Anime'}
         onTimeUpdate={handleTimeUpdate}
         onEnded={nextEpisode ? handleEnded : null}

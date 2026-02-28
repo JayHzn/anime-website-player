@@ -93,19 +93,6 @@ async function handleAction(action, payload, sender) {
     case "getLatestEpisodes": {
       const latest = await source.getLatestEpisodes();
       for (const r of latest) r.source = sourceName;
-
-      // Enrich covers via Jikan in background (same as search)
-      if (sender?.tab?.id) {
-        const tabId = sender.tab.id;
-        source.enrichCoversAsync(latest, (patches) => {
-          for (const p of patches) p.source = sourceName;
-          chrome.tabs.sendMessage(tabId, {
-            type: "ANIME_EXT_COVERS_UPDATE",
-            data: patches,
-          }).catch(() => {});
-        });
-      }
-
       return latest;
     }
     case "retryCovers": {

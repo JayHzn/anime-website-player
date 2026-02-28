@@ -22,7 +22,7 @@ const HOST_PRIORITY = ["vidmoly", "voe", "f16px", "streamtape", "mail.ru"];
 // In-memory cover cache
 const _coverCache = {};
 const COVER_TTL = 86400000; // 24h
-const COVER_ERROR_TTL = 60000; // 1min for errors (retry sooner)
+const COVER_ERROR_TTL = 10000; // 10s for errors (retry quickly)
 
 // Jikan: max 2 concurrent, 400ms between batch starts
 const JIKAN_CONCURRENCY = 2;
@@ -253,10 +253,6 @@ export class VoiranimeSource {
       while ((cardMatch = cardRegex.exec(html)) !== null) {
         const card = cardMatch[1];
 
-        // Image from item-thumb
-        const imgMatch = card.match(/class\s*=\s*["'][^"']*item-thumb[^"']*["'][\s\S]*?<img[^>]*src\s*=\s*["']([^"']+)["']/i);
-        const thumbUrl = imgMatch ? imgMatch[1] : "";
-
         // Anime link and title from post-title
         const titleMatch = card.match(/class\s*=\s*["'][^"']*post-title[^"']*["'][^>]*>[\s\S]*?<a\s[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i);
         if (!titleMatch) continue;
@@ -289,7 +285,7 @@ export class VoiranimeSource {
         results.push({
           id: slug,
           title,
-          cover: thumbUrl, // voiranime's own thumbnail
+          cover: "", // no cover — placeholder with initials will show
           type: "TV",
           year: null,
           rating,

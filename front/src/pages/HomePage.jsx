@@ -42,11 +42,10 @@ export default function HomePage() {
     });
   }, []);
 
-  // Retry missing covers every 30s until all loaded
+  // Retry missing covers every 2s until all catalogue covers loaded
   useEffect(() => {
     const timer = setInterval(() => {
-      const allAnimes = [...searchResults, ...latestEpisodes];
-      const missing = allAnimes.filter((a) => !a.cover?.trim());
+      const missing = searchResults.filter((a) => !a.cover?.trim());
       if (missing.length === 0) return;
 
       const unique = [];
@@ -59,9 +58,9 @@ export default function HomePage() {
       if (unique.length > 0) {
         api.retryCovers(unique, selectedSource).catch(() => {});
       }
-    }, 30000);
+    }, 2000);
     return () => clearInterval(timer);
-  }, [searchResults, latestEpisodes, selectedSource]);
+  }, [searchResults, selectedSource]);
 
   async function loadData() {
     setLoading(true);
@@ -197,12 +196,13 @@ export default function HomePage() {
               const handleClick = (e) => {
                 if (anime.latestEpisodeId) {
                   e.preventDefault();
-                  // Store anime context so WatchPage can find prev/next episodes
+                  // Store anime context with episode number for WatchPage
                   sessionStorage.setItem('currentAnime', JSON.stringify({
                     animeId: anime.id,
                     title: anime.title,
                     cover: anime.cover || '',
                     source: anime.source,
+                    episodeNumber: anime.latestEpisode,
                   }));
                   navigate(href);
                 }
