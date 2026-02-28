@@ -1,15 +1,17 @@
 import { useState, useEffect, useRef } from 'react';
-import { Link, useOutletContext } from 'react-router-dom';
-import { Play, Clock, Trash2, ChevronLeft, ChevronRight, Flame } from 'lucide-react';
+import { Link, useOutletContext, useNavigate } from 'react-router-dom';
+import { Play, Clock, Trash2, ChevronLeft, ChevronRight, Flame, Film } from 'lucide-react';
 import { api, onCoversUpdate } from '../api';
 import AnimeCard from '../components/AnimeCard';
 
 export default function HomePage() {
   const { selectedSource } = useOutletContext();
+  const navigate = useNavigate();
   const [progress, setProgress] = useState([]);
   const [searchResults, setSearchResults] = useState([]);
   const [latestEpisodes, setLatestEpisodes] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [imgErrors, setImgErrors] = useState(new Set());
   const carouselRef = useRef(null);
 
   useEffect(() => {
@@ -152,47 +154,83 @@ export default function HomePage() {
             className="flex gap-4 overflow-x-auto scrollbar-hide pb-2 snap-x snap-mandatory"
             style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
           >
-            {latestEpisodes.map((anime) => (
-              <Link
-                key={`latest-${anime.id}`}
-                to={`/anime/${anime.source}/${encodeURIComponent(anime.id)}`}
-                className="flex-shrink-0 w-44 snap-start group"
-              >
-                <div className="relative aspect-[3/4] rounded-xl overflow-hidden bg-bg-card">
-                  {anime.cover ? (
-                    <img
-                      src={anime.cover}
-                      alt={anime.title}
-                      className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
-                      loading="lazy"
-                    />
-                  ) : (
-                    <div className="w-full h-full bg-gradient-to-br from-white/10 to-white/5 flex items-center justify-center">
-                      <span className="text-2xl font-bold text-white/30">
-                        {anime.title?.slice(0, 2).toUpperCase()}
-                      </span>
+            {latestEpisodes.map((anime) => {
+              const hasCover = Boolean(anime.cover?.trim()) && !imgErrors.has(anime.id);
+              // If latest episode is available, go directly to watch it; otherwise go to anime page
+              const href = anime.latestEpisodeId
+                ? `/watch/${anime.source}/${anime.latestEpisodeId}`
+                : `/anime/${anime.source}/${encodeURIComponent(anime.id)}`;
+
+              const handleClick = (e) => {
+                if (anime.latestEpisodeId) {
+                  e.preventDefault();
+                  // Store anime context so WatchPage can find prev/next episodes
+                  sessionStorage.setItem('currentAnime', JSON.stringify({
+                    animeId: anime.id,
+                    title: anime.title,
+                    cover: anime.cover || '',
+                    source: anime.source,
+                  }));
+                  navigate(href);
+                }
+              };
+
+              return (
+                <Link
+                  key={`latest-${anime.id}`}
+                  to={href}
+                  onClick={handleClick}
+                  className="flex-shrink-0 w-44 snap-start group"
+                >
+                  <div className="relative aspect-[3/4] rounded-xl overflow-hidden bg-bg-card">
+                    {/* Cover image */}
+                    {hasCover && (
+                      <img
+                        src={anime.cover}
+                        alt={anime.title}
+                        className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
+                        loading="lazy"
+                        decoding="async"
+                        referrerPolicy="no-referrer"
+                        onError={() => setImgErrors((prev) => new Set(prev).add(anime.id))}
+                      />
+                    )}
+
+                    {/* Placeholder (no cover, error, or loading) */}
+                    {!hasCover && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-white/10 to-white/5">
+                        <span className="text-3xl font-bold text-white/30 select-none">
+                          {anime.title?.split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?'}
+                        </span>
+                        <Film className="absolute bottom-2 right-2 w-5 h-5 text-white/20" />
+                      </div>
+                    )}
+
+                    {/* Episode badge */}
+                    {anime.latestEpisode && (
+                      <div className="absolute bottom-2 left-2 bg-accent-primary/90 backdrop-blur-sm text-white text-[11px] font-bold px-2 py-0.5 rounded-md">
+                        Ep. {anime.latestEpisode}
+                      </div>
+                    )}
+                    {/* Rating badge */}
+                    {anime.rating && (
+                      <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm text-yellow-400 text-[10px] font-semibold px-1.5 py-0.5 rounded-md">
+                        ★ {anime.rating}
+                      </div>
+                    )}
+                    {/* Hover overlay */}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+                      <div className="w-10 h-10 rounded-full bg-accent-primary/90 flex items-center justify-center shadow-lg">
+                        <Play className="w-5 h-5 text-white fill-white ml-0.5" />
+                      </div>
                     </div>
-                  )}
-                  {/* Episode badge */}
-                  {anime.latestEpisode && (
-                    <div className="absolute bottom-2 left-2 bg-accent-primary/90 backdrop-blur-sm text-white text-[11px] font-bold px-2 py-0.5 rounded-md">
-                      Ep. {anime.latestEpisode}
-                    </div>
-                  )}
-                  {/* Rating badge */}
-                  {anime.rating && (
-                    <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm text-yellow-400 text-[10px] font-semibold px-1.5 py-0.5 rounded-md">
-                      ★ {anime.rating}
-                    </div>
-                  )}
-                  {/* Hover overlay */}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                </div>
-                <p className="mt-2 text-xs font-medium text-white/80 line-clamp-2 group-hover:text-accent-primary transition-colors">
-                  {anime.title}
-                </p>
-              </Link>
-            ))}
+                  </div>
+                  <p className="mt-2 text-xs font-medium text-white/80 line-clamp-2 group-hover:text-accent-primary transition-colors">
+                    {anime.title}
+                  </p>
+                </Link>
+              );
+            })}
           </div>
         </section>
       )}

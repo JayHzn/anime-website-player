@@ -38,6 +38,7 @@ export default memo(function AnimeCard({ anime, index = 0 }) {
             }`}
             loading="lazy"
             decoding="async"
+            referrerPolicy="no-referrer"
             onLoad={() => setLoaded(true)}
             onError={() => setError(true)}
           />
