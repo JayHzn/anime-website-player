@@ -186,9 +186,21 @@ export default function HomePage() {
             {progress.map((p) => (
               <div
                 key={p.anime_id}
-                className="bg-bg-card rounded-xl overflow-hidden border border-white/5 hover:border-accent-primary/20 transition-all group animate-fade-up"
+                className="relative bg-bg-card rounded-xl overflow-hidden border border-white/5 hover:border-accent-primary/20 transition-all group animate-fade-up"
               >
-                <div className="flex gap-4 p-4">
+                {/* Blurred background on hover */}
+                {p.anime_cover && (
+                  <div
+                    className="absolute inset-0 opacity-0 group-hover:opacity-15 transition-opacity duration-700 pointer-events-none"
+                    style={{
+                      backgroundImage: `url(${p.anime_cover})`,
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'center',
+                      filter: 'blur(20px) saturate(1.5)',
+                    }}
+                  />
+                )}
+                <div className="relative flex gap-4 p-4">
                   {/* Thumbnail */}
                   <Link
                     to={`/anime/${p.source}/${encodeURIComponent(p.anime_id)}`}
