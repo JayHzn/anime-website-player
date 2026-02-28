@@ -10,6 +10,32 @@ function getInitials(title) {
   return title.slice(0, 2).toUpperCase();
 }
 
+/** Clean title for VF/VOSTFR search — returns multiple search terms to try */
+function getSearchTerms(title) {
+  if (!title) return [];
+  // Strip VF/VOSTFR suffix
+  let clean = title
+    .replace(/\s*[-–—]\s*(VOSTFR|VF|vostfr|vf)\s*$/i, '')
+    .replace(/\s+(VOSTFR|VF|vostfr|vf)\s*$/i, '')
+    .trim();
+
+  const terms = [clean];
+
+  // Remove brackets: [Oshi no Ko] → Oshi no Ko
+  const noBrackets = clean.replace(/[\[\]()]/g, '').replace(/\s+/g, ' ').trim();
+  if (noBrackets !== clean) terms.push(noBrackets);
+
+  // Replace "Xrd/nd/st/th Season" with just the number: "3rd Season" → "3"
+  const noSeason = noBrackets
+    .replace(/\s*(\d+)(?:st|nd|rd|th)\s*season/i, ' $1')
+    .replace(/\s*season\s*(\d+)/i, ' $1')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (noSeason !== noBrackets) terms.push(noSeason);
+
+  return terms;
+}
+
 export default function AnimePage() {
   const { source, animeId } = useParams();
   const navigate = useNavigate();
@@ -19,6 +45,8 @@ export default function AnimePage() {
   const [loading, setLoading] = useState(true);
   const [coverLoaded, setCoverLoaded] = useState(false);
   const [coverError, setCoverError] = useState(false);
+  const [altLang, setAltLang] = useState(null); // { id, lang } if alternate version exists
+  const currentLang = animeId.endsWith('-vf') ? 'VF' : 'VOSTFR';
 
   useEffect(() => {
     loadAnime();
@@ -26,6 +54,7 @@ export default function AnimePage() {
 
   async function loadAnime() {
     setLoading(true);
+    setAltLang(null);
     try {
       const [eps, prog, info] = await Promise.all([
         api.getEpisodes(source, animeId),
@@ -35,6 +64,43 @@ export default function AnimePage() {
       setEpisodes(eps);
       setProgress(prog);
       if (info) setAnimeInfo(info);
+
+      // Find alternate VF/VOSTFR version
+      const isVF = animeId.endsWith('-vf');
+      const altLangLabel = isVF ? 'VOSTFR' : 'VF';
+
+      // Strategy 1: try direct slug (most reliable)
+      const directSlug = isVF ? animeId.replace(/-vf$/, '') : animeId + '-vf';
+      try {
+        const altEps = await api.getEpisodes(source, directSlug);
+        if (altEps && altEps.length > 0) {
+          setAltLang({ id: directSlug, lang: altLangLabel });
+        }
+      } catch {
+        // Strategy 2: search by title variants, match closest slug
+        try {
+          const title = info?.title || animeId;
+          const terms = getSearchTerms(title);
+          const baseSlug = isVF ? animeId.replace(/-vf$/, '') : animeId;
+
+          for (const term of terms) {
+            const searchQuery = isVF ? term : term + ' VF';
+            const results = await api.search(searchQuery, source);
+            const altResult = results.find((r) => {
+              if (r.id === animeId) return false;
+              const rIsVF = r.id.endsWith('-vf');
+              if (rIsVF === isVF) return false;
+              const rBase = rIsVF ? r.id.replace(/-vf$/, '') : r.id;
+              // Must match: same slug or candidate contains our slug (not the reverse — avoids matching season 1 for season 3)
+              return rBase === baseSlug || rBase.includes(baseSlug);
+            });
+            if (altResult) {
+              setAltLang({ id: altResult.id, lang: altLangLabel });
+              break;
+            }
+          }
+        } catch { /* no alt found */ }
+      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -118,6 +184,40 @@ export default function AnimePage() {
             <span>{episodes.length} épisodes</span>
             <span className="text-xs bg-bg-card px-2 py-0.5 rounded-md">{source}</span>
           </div>
+
+          {/* VF / VOSTFR toggle */}
+          {altLang && (
+            <div className="flex items-center gap-1 mt-4 bg-bg-card rounded-xl p-1 w-fit">
+              <button
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  currentLang === 'VOSTFR'
+                    ? 'bg-accent-primary text-white shadow'
+                    : 'text-white/50 hover:text-white hover:bg-white/5'
+                }`}
+                onClick={() => {
+                  if (currentLang !== 'VOSTFR') {
+                    navigate(`/anime/${source}/${encodeURIComponent(altLang.id)}`, { replace: true });
+                  }
+                }}
+              >
+                VOSTFR
+              </button>
+              <button
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  currentLang === 'VF'
+                    ? 'bg-accent-primary text-white shadow'
+                    : 'text-white/50 hover:text-white hover:bg-white/5'
+                }`}
+                onClick={() => {
+                  if (currentLang !== 'VF') {
+                    navigate(`/anime/${source}/${encodeURIComponent(altLang.id)}`, { replace: true });
+                  }
+                }}
+              >
+                VF
+              </button>
+            </div>
+          )}
 
           {/* Resume button */}
           {progress && progress.episode_number > 0 && (

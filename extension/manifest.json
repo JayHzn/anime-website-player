@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AnimeHub Source",
-  "version": "1.0.16",
+  "version": "1.0.17",
   "description": "Fournit les sources anime pour AnimeHub",
   "permissions": [],
   "host_permissions": [
@@ -22,6 +22,8 @@
       "matches": [
         "https://anime-website-player.onrender.com/*",
         "http://localhost:3000/*",
+        "http://localhost:3001/*",
+        "http://localhost:5173/*",
         "http://localhost:8080/*",
         "http://localhost:8000/*"
       ],

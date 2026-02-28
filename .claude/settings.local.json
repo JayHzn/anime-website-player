@@ -17,7 +17,8 @@
       "Bash(where py)",
       "Bash(node -c \"import\\(''./c/Users/jason/Documents/Informatique/Projets/anime-website-player/extension/background.js''\\)\")",
       "Bash(node --check /c/Users/jason/Documents/Informatique/Projets/anime-website-player/extension/background.js)",
-      "Bash(node -e \":*)"
+      "Bash(node -e \":*)",
+      "Bash(docker ps --format \"table {{.Names}}\\\\t{{.Status}}\\\\t{{.Ports}}\")"
     ]
   }
 }

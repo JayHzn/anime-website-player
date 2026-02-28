@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import VideoPlayer from '../components/VideoPlayer';
@@ -47,11 +47,14 @@ export default function WatchPage() {
 
   useEffect(() => {
     loadVideo();
-    // Fetch saved timestamp for this anime
+    setSavedTime(0);
+    // Fetch saved timestamp — only resume if it's the same episode
     if (animeCtx.animeId) {
       api.getAnimeProgress(animeCtx.animeId)
         .then((p) => {
-          if (p?.timestamp > 0) setSavedTime(p.timestamp);
+          if (p?.timestamp > 0 && p.episode_number === epNumber) {
+            setSavedTime(p.timestamp);
+          }
         })
         .catch(() => {});
     }
@@ -198,7 +201,43 @@ export default function WatchPage() {
     [animeCtx, currentEpisode, source]
   );
 
+  // Reference to the video element for saving on exit
+  const videoElRef = useRef(null);
+
+  // Save progress immediately (used on exit)
+  const saveProgressNow = useCallback(() => {
+    const video = videoElRef.current || document.querySelector('video');
+    if (!video || !animeCtx.animeId) return;
+    const time = video.currentTime;
+    if (time > 0) {
+      handleTimeUpdate(time);
+    }
+  }, [animeCtx.animeId, handleTimeUpdate]);
+
+  // Capture video element ref once mounted
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      videoElRef.current = document.querySelector('video');
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [videoData]);
+
+  // Save on page close / tab switch
+  useEffect(() => {
+    const onBeforeUnload = () => saveProgressNow();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') saveProgressNow();
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [saveProgressNow]);
+
   const handleBack = () => {
+    saveProgressNow();
     if (animeCtx.animeId) {
       navigate(`/anime/${source}/${encodeURIComponent(animeCtx.animeId)}`);
     } else {

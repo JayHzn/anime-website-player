@@ -11,8 +11,10 @@ export default function HomePage() {
   const [searchResults, setSearchResults] = useState([]);
   const [latestEpisodes, setLatestEpisodes] = useState([]);
   const [seasonAnime, setSeasonAnime] = useState([]);
+  const [loadingSeason, setLoadingSeason] = useState(true);
   const [loading, setLoading] = useState(true);
   const [imgErrors, setImgErrors] = useState(new Set());
+  const [resumingId, setResumingId] = useState(null);
   const carouselRef = useRef(null);
 
   useEffect(() => {
@@ -64,35 +66,105 @@ export default function HomePage() {
     return () => clearInterval(timer);
   }, [searchResults, latestEpisodes, selectedSource]);
 
+  // Season cache helpers (localStorage, TTL = 30 days)
+  const SEASON_CACHE_KEY = 'seasonAnimeCache';
+  const SEASON_CACHE_TTL = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+  function getCachedSeason() {
+    try {
+      const raw = localStorage.getItem(SEASON_CACHE_KEY);
+      if (!raw) return null;
+      const { data, ts } = JSON.parse(raw);
+      if (Date.now() - ts > SEASON_CACHE_TTL) {
+        localStorage.removeItem(SEASON_CACHE_KEY);
+        return null;
+      }
+      return data;
+    } catch {
+      return null;
+    }
+  }
+
+  function setCachedSeason(data) {
+    try {
+      localStorage.setItem(SEASON_CACHE_KEY, JSON.stringify({ data, ts: Date.now() }));
+    } catch { /* quota exceeded, ignore */ }
+  }
+
   async function loadData() {
     setLoading(true);
     try {
+      // Check season cache first
+      const cached = getCachedSeason();
+      if (cached && cached.length > 0) {
+        setSeasonAnime(cached);
+        setLoadingSeason(false);
+      } else {
+        setLoadingSeason(true);
+        setSeasonAnime([]);
+      }
+
       const [prog, results, latest, season] = await Promise.all([
         api.getProgress(),
         api.search('', selectedSource),
         api.getLatestEpisodes(selectedSource).catch(() => []),
-        api.getSeasonAnime().catch(() => []),
+        cached ? Promise.resolve([]) : api.getSeasonAnime().catch(() => []),
       ]);
       setProgress(prog);
       setSearchResults(results);
       setLatestEpisodes(latest);
-      setSeasonAnime(season);
+      setLoading(false);
+
+      // Resolve season anime against voiranime in background (only if not cached)
+      if (!cached && season.length > 0) {
+        resolveSeasonAnime(season);
+      } else if (!cached) {
+        setLoadingSeason(false);
+      }
     } catch (e) {
       console.error(e);
-    } finally {
       setLoading(false);
+      setLoadingSeason(false);
     }
   }
 
-  async function goToSeasonAnime(anime) {
-    try {
-      const results = await api.search(anime.title, selectedSource || 'voiranime');
-      if (results.length > 0) {
-        navigate(`/anime/${results[0].source}/${encodeURIComponent(results[0].id)}`);
+  async function resolveSeasonAnime(season) {
+    const src = selectedSource || 'voiranime';
+    // Resolve all anime titles against voiranime in parallel (batches of 5)
+    const BATCH = 5;
+    for (let i = 0; i < season.length; i += BATCH) {
+      const batch = season.slice(i, i + BATCH);
+      const results = await Promise.allSettled(
+        batch.map(async (anime) => {
+          const res = await api.search(anime.title, src);
+          if (res.length > 0) {
+            // Prefer VOSTFR version (no -vf suffix) over VF
+            const vostfr = res.find((r) => !r.id.endsWith('-vf'));
+            const pick = vostfr || res[0];
+            return { ...anime, voiranimeId: pick.id, voiranimeSource: pick.source };
+          }
+          return null;
+        })
+      );
+      const found = results
+        .filter((r) => r.status === 'fulfilled' && r.value)
+        .map((r) => r.value);
+      if (found.length > 0) {
+        setSeasonAnime((prev) => {
+          const existingIds = new Set(prev.map((a) => a.id));
+          const newOnes = found.filter((a) => !existingIds.has(a.id));
+          return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
+        });
       }
-    } catch {
-      // fallback: search page
-      navigate(`/search?q=${encodeURIComponent(anime.title)}`);
+    }
+    setLoadingSeason(false);
+    // Persist to cache
+    setSeasonAnime((final) => { setCachedSeason(final); return final; });
+  }
+
+  function goToSeasonAnime(anime) {
+    if (anime.voiranimeId) {
+      navigate(`/anime/${anime.voiranimeSource}/${encodeURIComponent(anime.voiranimeId)}`);
     }
   }
 
@@ -152,13 +224,42 @@ export default function HomePage() {
                     )}
 
                     <div className="flex items-center gap-2 mt-3">
-                      <Link
-                        to={`/anime/${p.source}/${encodeURIComponent(p.anime_id)}`}
-                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-accent-primary text-white text-xs font-medium hover:bg-accent-glow transition"
+                      <button
+                        disabled={resumingId === p.anime_id}
+                        onClick={async () => {
+                          setResumingId(p.anime_id);
+                          try {
+                            const eps = await api.getEpisodes(p.source, p.anime_id);
+                            const ep = eps.find((e) => e.number === p.episode_number) || eps[0];
+                            if (ep) {
+                              sessionStorage.setItem('currentAnime', JSON.stringify({
+                                animeId: p.anime_id,
+                                source: p.source,
+                                title: p.anime_title,
+                                cover: p.anime_cover || '',
+                                episodes: eps,
+                                totalEpisodes: eps.length,
+                                episodeNumber: p.episode_number,
+                              }));
+                              navigate(`/watch/${p.source}/${ep.id}`);
+                            } else {
+                              navigate(`/anime/${p.source}/${encodeURIComponent(p.anime_id)}`);
+                            }
+                          } catch {
+                            navigate(`/anime/${p.source}/${encodeURIComponent(p.anime_id)}`);
+                          } finally {
+                            setResumingId(null);
+                          }
+                        }}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-accent-primary text-white text-xs font-medium hover:bg-accent-glow transition disabled:opacity-60"
                       >
-                        <Play className="w-3 h-3 fill-white" />
-                        Reprendre
-                      </Link>
+                        {resumingId === p.anime_id ? (
+                          <div className="w-3 h-3 border border-white/40 border-t-white rounded-full animate-spin" />
+                        ) : (
+                          <Play className="w-3 h-3 fill-white" />
+                        )}
+                        {resumingId === p.anime_id ? 'Chargement...' : 'Reprendre'}
+                      </button>
                       <button
                         onClick={() => removeProgress(p.anime_id)}
                         className="p-1.5 rounded-lg text-white/20 hover:text-red-400 hover:bg-red-400/10 transition"
@@ -290,67 +391,75 @@ export default function HomePage() {
           <Sparkles className="w-5 h-5 text-purple-400" />
           <h2 className="font-display font-bold text-xl text-white">Animes de la saison</h2>
         </div>
-        {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <div className="w-8 h-8 border-2 border-white/10 border-t-accent-primary rounded-full animate-spin" />
-          </div>
-        ) : seasonAnime.length > 0 ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-5">
-            {seasonAnime.map((anime, i) => {
-              const hasCover = Boolean(anime.cover?.trim()) && !imgErrors.has(anime.id);
-              return (
-                <div
-                  key={anime.id}
-                  onClick={() => goToSeasonAnime(anime)}
-                  className={`group block animate-fade-up animate-fade-up-delay-${(i % 4) + 1} cursor-pointer`}
-                >
-                  <div className="relative aspect-[3/4] rounded-xl overflow-hidden bg-bg-card">
-                    {hasCover && (
-                      <img
-                        src={anime.cover}
-                        alt={anime.title}
-                        className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
-                        loading="lazy"
-                        decoding="async"
-                        referrerPolicy="no-referrer"
-                        onError={() => setImgErrors((prev) => new Set(prev).add(anime.id))}
-                      />
-                    )}
-                    {!hasCover && (
-                      <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-white/10 to-white/5">
-                        <span className="text-3xl font-bold text-white/30 select-none">
-                          {anime.title?.split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?'}
-                        </span>
-                        <Film className="absolute bottom-2 right-2 w-5 h-5 text-white/20" />
-                      </div>
-                    )}
-                    {/* Score badge */}
-                    {anime.score && (
-                      <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm text-yellow-400 text-[10px] font-semibold px-1.5 py-0.5 rounded-md">
-                        ★ {anime.score}
-                      </div>
-                    )}
-                    {/* Episodes badge */}
-                    {(anime.airedEpisodes || anime.episodes) && (
-                      <div className="absolute bottom-2 left-2 bg-black/60 backdrop-blur-sm text-white/80 text-[10px] font-semibold px-1.5 py-0.5 rounded-md">
-                        {anime.airedEpisodes ? `${anime.airedEpisodes}` : ''}{anime.airedEpisodes && anime.episodes ? ' / ' : ''}{anime.episodes ? `${anime.episodes}` : ''} ep.
-                      </div>
-                    )}
-                    {/* Hover overlay */}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
-                      <div className="w-10 h-10 rounded-full bg-accent-primary/90 flex items-center justify-center shadow-lg">
-                        <Play className="w-5 h-5 text-white fill-white ml-0.5" />
+        {seasonAnime.length > 0 ? (
+          <>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-5">
+              {seasonAnime.map((anime, i) => {
+                const hasCover = Boolean(anime.cover?.trim()) && !imgErrors.has(anime.id);
+                return (
+                  <div
+                    key={anime.id}
+                    onClick={() => goToSeasonAnime(anime)}
+                    className={`group block animate-fade-up animate-fade-up-delay-${(i % 4) + 1} cursor-pointer`}
+                  >
+                    <div className="relative aspect-[3/4] rounded-xl overflow-hidden bg-bg-card">
+                      {hasCover && (
+                        <img
+                          src={anime.cover}
+                          alt={anime.title}
+                          className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
+                          loading="lazy"
+                          decoding="async"
+                          referrerPolicy="no-referrer"
+                          onError={() => setImgErrors((prev) => new Set(prev).add(anime.id))}
+                        />
+                      )}
+                      {!hasCover && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-white/10 to-white/5">
+                          <span className="text-3xl font-bold text-white/30 select-none">
+                            {anime.title?.split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?'}
+                          </span>
+                          <Film className="absolute bottom-2 right-2 w-5 h-5 text-white/20" />
+                        </div>
+                      )}
+                      {/* Score badge */}
+                      {anime.score && (
+                        <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm text-yellow-400 text-[10px] font-semibold px-1.5 py-0.5 rounded-md">
+                          ★ {anime.score}
+                        </div>
+                      )}
+                      {/* Episodes badge */}
+                      {(anime.airedEpisodes || anime.episodes) && (
+                        <div className="absolute bottom-2 left-2 bg-black/60 backdrop-blur-sm text-white/80 text-[10px] font-semibold px-1.5 py-0.5 rounded-md">
+                          {anime.airedEpisodes ? `${anime.airedEpisodes}` : ''}{anime.airedEpisodes && anime.episodes ? ' / ' : ''}{anime.episodes ? `${anime.episodes}` : ''} ep.
+                        </div>
+                      )}
+                      {/* Hover overlay */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+                        <div className="w-10 h-10 rounded-full bg-accent-primary/90 flex items-center justify-center shadow-lg">
+                          <Play className="w-5 h-5 text-white fill-white ml-0.5" />
+                        </div>
                       </div>
                     </div>
+                    <div className="mt-2.5 px-0.5">
+                      <h3 className="font-display font-semibold text-sm text-white/90 leading-tight line-clamp-2 group-hover:text-accent-primary transition-colors">
+                        {anime.title}
+                      </h3>
+                    </div>
                   </div>
-                  <div className="mt-2.5 px-0.5">
-                    <h3 className="font-display font-semibold text-sm text-white/90 leading-tight line-clamp-2 group-hover:text-accent-primary transition-colors">
-                      {anime.title}
-                    </h3>
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
+            {loadingSeason && (
+              <div className="flex items-center justify-center py-6">
+                <div className="w-6 h-6 border-2 border-white/10 border-t-purple-400 rounded-full animate-spin" />
+                <span className="ml-3 text-white/30 text-sm">Recherche en cours...</span>
+              </div>
+            )}
+          </>
+        ) : loadingSeason ? (
+          <div className="flex items-center justify-center py-20">
+            <div className="w-8 h-8 border-2 border-white/10 border-t-purple-400 rounded-full animate-spin" />
           </div>
         ) : (
           <div className="text-center py-20 text-white/30">

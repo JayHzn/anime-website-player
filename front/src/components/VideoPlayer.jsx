@@ -84,7 +84,10 @@ export default function VideoPlayer({
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         setIsLoading(false);
-        if (initialTime > 0) video.currentTime = initialTime;
+        if (initialTime > 0) {
+          video.currentTime = initialTime;
+          appliedInitialTime.current = true;
+        }
         video.play().catch(() => {});
       });
       hls.on(Hls.Events.ERROR, (e, data) => {
@@ -110,7 +113,10 @@ export default function VideoPlayer({
       video.src = videoData.url;
       video.addEventListener('loadeddata', () => {
         setIsLoading(false);
-        if (initialTime > 0) video.currentTime = initialTime;
+        if (initialTime > 0) {
+          video.currentTime = initialTime;
+          appliedInitialTime.current = true;
+        }
         video.play().catch(() => {});
       });
       video.addEventListener('error', handleError);
@@ -123,6 +129,20 @@ export default function VideoPlayer({
       }
       video.removeEventListener('error', handleError);
     };
+  }, [videoData?.url]);
+
+  // Seek to initialTime when it arrives late (after video already loaded)
+  const appliedInitialTime = useRef(false);
+  useEffect(() => {
+    if (initialTime > 0 && !isLoading && videoRef.current && !appliedInitialTime.current) {
+      videoRef.current.currentTime = initialTime;
+      appliedInitialTime.current = true;
+    }
+  }, [initialTime, isLoading]);
+
+  // Reset applied flag when video changes
+  useEffect(() => {
+    appliedInitialTime.current = false;
   }, [videoData?.url]);
 
   // Progress reporting
@@ -201,12 +221,13 @@ export default function VideoPlayer({
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [isIframe, activeSkip, skipSegments]);
+  }, [isIframe, activeSkip, skipSegments, resetHideTimer]);
 
   const togglePlay = () => {
     const video = videoRef.current;
     if (!video) return;
     video.paused ? video.play() : video.pause();
+    document.activeElement?.blur();
     resetHideTimer();
   };
 
@@ -218,6 +239,8 @@ export default function VideoPlayer({
       document.exitFullscreen();
       setIsFullscreen(false);
     }
+    // Remove focus from button so keyboard shortcuts work immediately
+    document.activeElement?.blur();
     resetHideTimer();
   };
 
@@ -229,6 +252,7 @@ export default function VideoPlayer({
   };
 
   const handleProgressClick = (e) => {
+    e.stopPropagation();
     const rect = e.currentTarget.getBoundingClientRect();
     const pct = (e.clientX - rect.left) / rect.width;
     if (videoRef.current) {

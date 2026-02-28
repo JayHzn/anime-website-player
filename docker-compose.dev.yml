@@ -1,0 +1,27 @@
+services:
+  backend:
+    build:
+      context: ./back
+      dockerfile: Dockerfile.dev
+    container_name: animehub-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./back:/app
+      - animehub-data:/app/data
+    restart: unless-stopped
+
+  frontend:
+    build: ./front
+    container_name: animehub-web
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./front:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  animehub-data:
