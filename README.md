@@ -1,121 +1,110 @@
-# 🎬 AnimeHub - Local Anime Streaming Aggregator
+# AnimeHub
 
-Un lecteur d'anime local qui agrège des sources de streaming avec un système de plugins.
+Plateforme de streaming d'anime et drama qui agrège plusieurs sources. Disponible en web (avec extension navigateur) et en application mobile Android.
 
-## Features
+## Fonctionnalités
 
-- 🔍 **Recherche** multi-sources
-- 📺 **Lecteur vidéo** intégré avec support HLS (`.m3u8`)
-- ▶️ **Autoplay** épisode suivant
-- 📊 **Suivi de progression** (reprendre là où tu t'es arrêté)
-- 🔌 **Système de plugins** pour ajouter des sources facilement
-- ⌨️ **Raccourcis clavier** : Espace (play/pause), F (fullscreen), ←→ (±10s), ↑↓ (volume), M (mute)
+- **Recherche multi-sources** : Voiranime (anime VF/VOSTFR), VoirDrama (dramas)
+- **Lecteur vidéo** HLS avec contrôles personnalisés
+- **Suivi de progression** : reprendre là où tu t'es arrêté
+- **Skip automatique** des openings/endings (détection IA)
+- **Autoplay** de l'épisode suivant
+- **Raccourcis clavier** : Espace (play/pause), F (fullscreen), ←→ (±10s), ↑↓ (volume), M (mute)
+- **App mobile Android** : double-tap pour avancer/reculer, contrôles tactiles
 
 ## Architecture
 
 ```
-anime-hub/
-├── backend/
-│   ├── main.py              # FastAPI server
-│   ├── requirements.txt
-│   ├── db/
-│   │   └── database.py      # SQLite progress tracking
-│   └── sources/
-│       ├── base.py           # Plugin interface (abstract)
-│       ├── demo.py           # Source démo avec données mock
-│       └── _example_template.py  # Template pour créer une source
-└── frontend/
-    ├── package.json
-    ├── vite.config.js        # Proxy vers le backend
-    └── src/
-        ├── api.js            # Client API
-        ├── App.jsx           # Router
-        ├── components/
-        │   ├── Layout.jsx    # Navbar + search
-        │   ├── AnimeCard.jsx # Card anime
-        │   └── VideoPlayer.jsx # Lecteur vidéo custom
-        └── pages/
-            ├── HomePage.jsx   # Accueil + continuer à regarder
-            ├── SearchPage.jsx # Résultats de recherche
-            ├── AnimePage.jsx  # Détail anime + liste épisodes
-            └── WatchPage.jsx  # Plein écran lecteur
+anime-website-player/
+├── back/                  # Backend FastAPI (API, proxy HLS, ML)
+│   ├── main.py            # Serveur principal
+│   ├── sources/           # Plugins de sources (voiranime, voirdrama)
+│   ├── db/                # SQLite (progression, skip segments)
+│   └── ml/                # Détection OP/ED par CNN
+├── front/                 # Frontend React (SPA)
+│   └── src/
+│       ├── api.js         # Bridge extension + client API
+│       ├── components/    # VideoPlayer, AnimeCard, Layout...
+│       └── pages/         # Home, Search, Anime, Watch, History
+├── extension/             # Extension Chrome/Firefox
+│   ├── background.js      # Service worker (scraping, cache)
+│   ├── content.js         # Injection du bridge
+│   └── sources/           # Parsers (voiranime.js, voirdrama.js)
+└── mobile/                # App React Native (Expo)
+    ├── App.js             # WebView + handler de sources
+    ├── bridge.js          # Script injecté (CSS mobile, bridge)
+    └── sources/           # Mêmes parsers que l'extension
+```
+
+## Comment ça marche
+
+Le scraping des sites de streaming est effectué **côté client** (extension navigateur ou app mobile), jamais par le backend. Cela évite de surcharger le serveur et contourne les protections anti-hotlink.
+
+```
+Utilisateur → Extension/App Mobile → Sites de streaming (voiranime, voirdrama)
+                                    → Hébergeurs vidéo (vidmoly, voe, etc.)
+Utilisateur → Backend (FastAPI)     → Proxy HLS, progression, détection OP/ED
 ```
 
 ## Installation
 
-### Option 1 : Docker (recommandé) 🐳
+### Docker (recommandé)
 
 ```bash
-# Clone le projet puis :
-cd anime-hub
+git clone https://github.com/JayHzn/anime-website-player.git
+cd anime-website-player
 docker compose up --build
 ```
 
-C'est tout. Ouvre **http://localhost:3000**.
+Ouvre **http://localhost:3000**. Hot-reload activé.
 
-- Le hot-reload est actif : modifie les fichiers et ça se met à jour tout seul
-- La base de données est persistée dans un volume Docker
-- Pour arrêter : `docker compose down`
-- Pour tout supprimer (y compris les données) : `docker compose down -v`
+### Manuel
 
-### Option 2 : Installation locale
-
-#### Prérequis
-
-- Python 3.11+
-- Node.js 18+
-
-#### Backend
-
+**Backend :**
 ```bash
-cd backend
+cd back
 pip install -r requirements.txt
 python main.py
-# → API sur http://localhost:8000
+# → http://localhost:8000
 ```
 
-### Frontend
-
+**Frontend :**
 ```bash
-cd frontend
+cd front
 npm install
 npm run dev
-# → App sur http://localhost:3000
+# → http://localhost:3000
 ```
 
-Ouvre **http://localhost:3000** dans ton navigateur.
+### Extension navigateur
+
+1. Ouvre `chrome://extensions` (ou `about:debugging` sur Firefox)
+2. Active le mode développeur
+3. Charge le dossier `extension/` comme extension non empaquetée
+
+### App mobile (Android)
+
+Télécharge l'APK depuis les [Releases](https://github.com/JayHzn/anime-website-player/releases).
+
+Pour builder toi-même :
+```bash
+cd mobile
+npm install
+npx eas build -p android --profile preview
+```
 
 ## Ajouter une source
 
-1. Copie `backend/sources/_example_template.py` → `backend/sources/ma_source.py`
-2. Implémente les 3 méthodes :
-   - `search(query)` → liste d'animes
-   - `get_episodes(anime_id)` → liste d'épisodes
-   - `get_video_url(episode_id)` → URL vidéo + headers
-3. Redémarre le backend → ta source est auto-détectée
-
-### Format attendu
-
-**search()** retourne :
-
-```python
-[{"id": "...", "title": "...", "cover": "https://...", "type": "TV", "year": 2024}]
-```
-
-**get_episodes()** retourne :
-
-```python
-[{"id": "...", "number": 1, "title": "Episode 1"}]
-```
-
-**get_video_url()** retourne :
-
-```python
-{"url": "https://...m3u8", "referer": "...", "headers": {}, "subtitles": []}
-```
+1. Copie `back/sources/_example_template.py` → `back/sources/ma_source.py`
+2. Implémente les 3 méthodes : `search()`, `get_episodes()`, `get_video_url()`
+3. Copie le parser JS correspondant dans `extension/sources/` et `mobile/sources/`
+4. Redémarre — la source est auto-détectée
 
 ## Stack
 
-- **Backend** : FastAPI + SQLite + httpx + BeautifulSoup
-- **Frontend** : React 18 + Vite + Tailwind CSS + hls.js
-- **Lecteur** : Custom avec HLS, autoplay, raccourcis clavier
+| Composant | Technologies |
+|-----------|-------------|
+| Backend | FastAPI, SQLite, httpx, BeautifulSoup, librosa (ML) |
+| Frontend | React 18, Vite, Tailwind CSS, hls.js |
+| Extension | Manifest V3, IndexedDB, postMessage bridge |
+| Mobile | React Native (Expo), WebView, AsyncStorage |

@@ -37,7 +37,17 @@
       "Bash(git add front/src/components/VideoPlayer.jsx front/src/components/Layout.jsx front/src/pages/HomePage.jsx front/src/pages/AnimePage.jsx front/src/api.js extension/background.js extension/manifest.json extension/manifest.firefox.json extension/sources/voiranime.js extension/sources/voirdrama.js back/sources/voirdrama.py back/main.py mobile/App.js mobile/app.json mobile/babel.config.js mobile/bridge.js mobile/eas.json mobile/package.json mobile/sources/voiranime.js mobile/sources/voirdrama.js mobile/assets/icon.png)",
       "Bash(git commit:*)",
       "Bash(git push)",
-      "Bash(ls c:/Users/jason/Documents/Informatique/Projets/anime-website-player/*.js c:/Users/jason/Documents/Informatique/Projets/anime-website-player/*.mjs)"
+      "Bash(ls c:/Users/jason/Documents/Informatique/Projets/anime-website-player/*.js c:/Users/jason/Documents/Informatique/Projets/anime-website-player/*.mjs)",
+      "Bash(npx --yes sharp-cli -i public/favicon.svg -o public/icons/icon-192.png --width 192 --height 192)",
+      "Bash(npx --yes sharp-cli --help)",
+      "Bash(npx sharp-cli -i public/favicon.svg -o public/icons/icon-192.png resize 192 192)",
+      "Bash(npx sharp-cli -i public/favicon.svg -o public/icons/icon-512.png resize 512 512)",
+      "Bash(npx sharp-cli -i public/favicon.svg -o public/icons/apple-touch-icon.png resize 180 180)",
+      "Bash(zip -r extension-v1.0.0.zip extension/ -x \"extension/node_modules/*\")",
+      "Bash(powershell -Command \"Compress-Archive -Path ''extension/*'' -DestinationPath ''extension-v1.0.0.zip'' -Force\")",
+      "Bash(npx eas build:list --platform android --limit 1 --non-interactive)",
+      "Bash(command -v gh)",
+      "Bash(powershell -Command \"Get-Command gh -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source\")"
     ]
   }
 }
