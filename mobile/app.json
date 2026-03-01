@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "AnimeHub",
+    "slug": "animehub",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#0f172a"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.animehub.mobile"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#0f172a"
+      },
+      "package": "com.animehub.mobile"
+    },
+    "plugins": [
+      "expo-asset"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "89b2fc8a-565c-450f-92d5-de0386b9a0b9"
+      }
+    }
+  }
+}

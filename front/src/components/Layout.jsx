@@ -6,7 +6,7 @@ import { api, isExtensionAvailable } from '../api';
 export default function Layout() {
   const [query, setQuery] = useState('');
   const [sources, setSources] = useState([]);
-  const [selectedSource, setSelectedSource] = useState(null); // null = all sources
+  const [selectedSource, setSelectedSource] = useState('voiranime'); // default to voiranime
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
   const navigate = useNavigate();
@@ -15,8 +15,11 @@ export default function Layout() {
   const [bannerDismissed, setBannerDismissed] = useState(false);
 
   useEffect(() => {
-    api.getSources().then(setSources).catch(console.error);
-    isExtensionAvailable().then((ok) => setExtMissing(!ok));
+    // Wait for extension detection first, then get sources (extension provides the list)
+    isExtensionAvailable().then((ok) => {
+      setExtMissing(!ok);
+      api.getSources().then(setSources).catch(console.error);
+    });
   }, []);
 
   // Close dropdown on outside click
@@ -106,7 +109,7 @@ export default function Layout() {
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Rechercher un anime..."
+                placeholder="Rechercher un anime ou un drama..."
                 className="w-full bg-bg-secondary border border-white/5 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:border-accent-primary/50 focus:ring-1 focus:ring-accent-primary/20 transition-all"
               />
             </div>

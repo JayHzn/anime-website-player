@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Play, CheckCircle2, Film } from 'lucide-react';
 import { api } from '../api';
 
@@ -39,6 +39,7 @@ function getSearchTerms(title) {
 export default function AnimePage() {
   const { source, animeId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [episodes, setEpisodes] = useState([]);
   const [animeInfo, setAnimeInfo] = useState(null);
   const [progress, setProgress] = useState(null);
@@ -63,7 +64,14 @@ export default function AnimePage() {
       ]);
       setEpisodes(eps);
       setProgress(prog);
-      if (info) setAnimeInfo(info);
+      // Use cover passed via navigation state (from catalogue) — more reliable than Jikan search
+      const navCover = location.state?.cover;
+      if (info) {
+        if (navCover) info.cover = navCover;
+        setAnimeInfo(info);
+      } else if (navCover) {
+        setAnimeInfo({ id: animeId, title: animeId.replace(/-/g, ' '), cover: navCover, type: '', year: null });
+      }
 
       // Find alternate VF/VOSTFR version
       const isVF = animeId.endsWith('-vf');

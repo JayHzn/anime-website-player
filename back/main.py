@@ -73,7 +73,7 @@ def load_sources():
     """Dynamically load all source plugins from the sources/ directory."""
     sources_dir = os.path.join(os.path.dirname(__file__), "sources")
     for _, module_name, _ in pkgutil.iter_modules([sources_dir]):
-        if module_name == "base":
+        if module_name == "base" or module_name.startswith("_"):
             continue
         try:
             module = importlib.import_module(f"sources.{module_name}")

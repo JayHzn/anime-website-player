@@ -1,12 +1,11 @@
 /**
- * Voiranime.com source plugin — JS port of back/sources/voiranime.py
+ * VoirDrama.tv source plugin
  *
- * IMPORTANT: This runs in a Chrome extension SERVICE WORKER.
- * No DOM APIs (DOMParser, document, etc.) — all HTML parsing is regex-based.
+ * Same WP-Manga platform as voiranime, adapted for dramas.
+ * Runs in a Chrome extension SERVICE WORKER — no DOM APIs.
  */
 
-const BASE = "https://v6.voiranime.com";
-const JIKAN_BASE = "https://api.jikan.moe/v4";
+const BASE = "https://voirdrama.tv";
 
 const HEADERS = {
   "User-Agent":
@@ -19,100 +18,8 @@ const HEADERS = {
 
 const HOST_PRIORITY = ["vidmoly", "voe", "f16px", "streamtape", "mail.ru"];
 
-// Cover cache: in-memory (fast) + IndexedDB (persistent across sessions)
-const _memCache = {};
-const COVER_TTL = 86400000 * 7; // 7 days for successful covers
-const COVER_ERROR_TTL = 10000; // 10s for errors (retry quickly)
-const DB_NAME = "animehub_covers";
-const DB_STORE = "covers";
-let _db = null;
-
-async function _openDB() {
-  if (_db) return _db;
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains(DB_STORE)) {
-        db.createObjectStore(DB_STORE, { keyPath: "key" });
-      }
-    };
-    req.onsuccess = () => { _db = req.result; resolve(_db); };
-    req.onerror = () => reject(req.error);
-  });
-}
-
-async function _dbGet(key) {
-  try {
-    const db = await _openDB();
-    return new Promise((resolve) => {
-      const tx = db.transaction(DB_STORE, "readonly");
-      const req = tx.objectStore(DB_STORE).get(key);
-      req.onsuccess = () => resolve(req.result || null);
-      req.onerror = () => resolve(null);
-    });
-  } catch { return null; }
-}
-
-async function _dbSet(key, cover) {
-  try {
-    const db = await _openDB();
-    const tx = db.transaction(DB_STORE, "readwrite");
-    tx.objectStore(DB_STORE).put({ key, cover, at: Date.now() });
-  } catch { /* ignore */ }
-}
-
-async function _cacheGet(key) {
-  // 1. In-memory (instant)
-  const mem = _memCache[key];
-  if (mem) {
-    const ttl = mem.cover ? COVER_TTL : COVER_ERROR_TTL;
-    if (Date.now() - mem.at < ttl) return mem;
-  }
-  // 2. IndexedDB (persistent)
-  const stored = await _dbGet(key);
-  if (stored) {
-    const ttl = stored.cover ? COVER_TTL : COVER_ERROR_TTL;
-    if (Date.now() - stored.at < ttl) {
-      _memCache[key] = stored; // promote to memory
-      return stored;
-    }
-  }
-  return null;
-}
-
-function _cacheSet(key, cover) {
-  const entry = { key, cover, at: Date.now() };
-  _memCache[key] = entry;
-  // Only persist successful covers to IndexedDB (not errors)
-  if (cover) _dbSet(key, cover);
-}
-
-// Jikan: max 3 concurrent, 200ms between starts (Jikan allows 3 req/s)
-const JIKAN_CONCURRENCY = 3;
-const JIKAN_DELAY_MS = 200;
-let _jikanInFlight = 0;
-let _jikanLastStart = 0;
-
-async function _jikanAcquire() {
-  while (_jikanInFlight >= JIKAN_CONCURRENCY) {
-    await new Promise((r) => setTimeout(r, 50));
-  }
-  const elapsed = Date.now() - _jikanLastStart;
-  if (elapsed < JIKAN_DELAY_MS) {
-    await new Promise((r) => setTimeout(r, JIKAN_DELAY_MS - elapsed));
-  }
-  _jikanInFlight++;
-  _jikanLastStart = Date.now();
-}
-
-function _jikanRelease() {
-  _jikanInFlight--;
-}
-
 // ── Regex HTML helpers ──────────────────────────────────────
 
-/** Extract all matches of a regex, returning array of match arrays */
 function matchAll(html, regex) {
   const results = [];
   let m;
@@ -121,18 +28,15 @@ function matchAll(html, regex) {
   return results;
 }
 
-/** Extract attribute value from an HTML tag string */
 function getAttr(tag, attr) {
   const m = tag.match(new RegExp(`${attr}\\s*=\\s*["']([^"']*)["']`, "i"));
   return m ? m[1] : null;
 }
 
-/** Strip HTML tags, return text content */
 function stripTags(html) {
   return html.replace(/<[^>]*>/g, "").trim();
 }
 
-/** Decode common HTML entities */
 function decodeEntities(str) {
   return str
     .replace(/&amp;/g, "&")
@@ -144,8 +48,32 @@ function decodeEntities(str) {
     .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(n));
 }
 
-export class VoiranimeSource {
-  name = "voiranime";
+/** Extract best (largest) cover URL from an img tag HTML string */
+function bestCover(imgTag) {
+  if (!imgTag) return "";
+  // Try srcset first — pick the largest variant (350x476)
+  const srcsetMatch = imgTag.match(/srcset\s*=\s*["']([^"']+)["']/i);
+  if (srcsetMatch) {
+    const parts = srcsetMatch[1].split(",").map((s) => s.trim());
+    let best = "";
+    let bestW = 0;
+    for (const part of parts) {
+      const [url, w] = part.split(/\s+/);
+      const width = parseInt(w) || 0;
+      if (width > bestW) { bestW = width; best = url; }
+    }
+    if (best) return best;
+  }
+  // Fallback: src attribute, remove thumbnail suffix for full-size
+  const srcMatch = imgTag.match(/src\s*=\s*["']([^"']+)["']/i);
+  if (srcMatch) {
+    return srcMatch[1].replace(/-\d+x\d+\./, ".");
+  }
+  return "";
+}
+
+export class VoirdramaSource {
+  name = "voirdrama";
 
   // ── Search ────────────────────────────────────────────────
 
@@ -153,8 +81,8 @@ export class VoiranimeSource {
     const results = [];
     const seenIds = new Set();
 
-    // Run both Ajax Search Pro requests in parallel (VOSTFR id=3, VF id=2)
-    const searchPromises = [3, 2].map(async (searchId) => {
+    // Ajax Search Pro: VOSTFR id=6, VF id=7
+    const searchPromises = [6, 7].map(async (searchId) => {
       try {
         const body = new URLSearchParams({
           action: "ajaxsearchpro_search",
@@ -180,7 +108,7 @@ export class VoiranimeSource {
         const html = await resp.text();
         return html.trim() || "";
       } catch (e) {
-        console.warn(`[voiranime] Search error (id=${searchId}):`, e);
+        console.warn(`[voirdrama] Search error (id=${searchId}):`, e);
         return "";
       }
     });
@@ -195,45 +123,40 @@ export class VoiranimeSource {
       results.push(...fallback);
     }
 
-    // Return results immediately — covers will be fetched by enrichCoversAsync
     return results;
   }
 
-  /**
-   * Enrich covers via Jikan. onUpdate reçoit uniquement les animes modifiés { id, source, cover }
-   * pour éviter les re-renders en cascade et les rechargements d’images inutiles.
-   */
+  // Convert hotlink-protected covers to data URLs via extension fetch
   async enrichCoversAsync(results, onUpdate) {
-    const pending = [];
-    let scheduled = null;
+    const needsProxy = results.filter((r) => r.cover?.includes("voirdrama.tv/wp-content/"));
+    if (needsProxy.length === 0) return;
 
-    const scheduleNotify = () => {
-      if (!onUpdate || pending.length === 0) return;
-      if (scheduled) return;
-      scheduled = setTimeout(() => {
-        scheduled = null;
-        const batch = pending.splice(0, pending.length);
-        onUpdate(batch);
-      }, 50);
-    };
-
-    await Promise.all(
-      results.map(async (r) => {
-        const jikanCover = await this._fetchCoverForAnime(r);
-        if (jikanCover) {
-          r.cover = jikanCover;
-          pending.push({ id: r.id, source: r.source, cover: jikanCover });
-          scheduleNotify();
-        }
-      })
-    );
-    if (scheduled) clearTimeout(scheduled);
-    if (pending.length > 0 && onUpdate) onUpdate(pending);
+    const BATCH = 5;
+    for (let i = 0; i < needsProxy.length; i += BATCH) {
+      const batch = needsProxy.slice(i, i + BATCH);
+      const patches = [];
+      await Promise.all(
+        batch.map(async (r) => {
+          try {
+            const resp = await fetch(r.cover, { headers: { Referer: BASE + "/" } });
+            if (!resp.ok) return;
+            const buf = await resp.arrayBuffer();
+            const bytes = new Uint8Array(buf);
+            let binary = "";
+            for (let j = 0; j < bytes.length; j++) binary += String.fromCharCode(bytes[j]);
+            const contentType = resp.headers.get("content-type") || "image/jpeg";
+            const dataUrl = `data:${contentType};base64,${btoa(binary)}`;
+            r.cover = dataUrl;
+            patches.push({ id: r.id, source: r.source, cover: dataUrl });
+          } catch { /* ignore */ }
+        })
+      );
+      if (patches.length > 0 && onUpdate) onUpdate(patches);
+    }
   }
 
   _parseSearchResults(html, seenIds, results) {
-    // Find all <a> tags with href containing /anime/
-    const linkRegex = /<a\s[^>]*href\s*=\s*["']([^"']*\/anime\/[^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    const linkRegex = /<a\s[^>]*href\s*=\s*["']([^"']*\/drama\/[^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
     let m;
     while ((m = linkRegex.exec(html)) !== null) {
       const link = decodeEntities(m[1]);
@@ -243,23 +166,22 @@ export class VoiranimeSource {
       if (!slug || seenIds.has(slug)) continue;
       seenIds.add(slug);
 
-      // Try to get title from <h3> inside, or from link text
       let title = null;
       const h3Match = innerHtml.match(/<h3[^>]*>([\s\S]*?)<\/h3>/i);
-      if (h3Match) {
-        title = stripTags(h3Match[1]);
-      }
-      if (!title) {
-        title = stripTags(innerHtml);
-      }
-
+      if (h3Match) title = stripTags(h3Match[1]);
+      if (!title) title = stripTags(innerHtml);
       if (!title) title = slug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+      // Try to extract cover from search results (best quality)
+      let cover = "";
+      const imgTag = innerHtml.match(/<img[^>]*>/i);
+      if (imgTag) cover = bestCover(imgTag[0]);
 
       results.push({
         id: slug,
         title: decodeEntities(title),
-        cover: "",
-        type: "TV",
+        cover,
+        type: "Drama",
         year: null,
       });
     }
@@ -275,8 +197,7 @@ export class VoiranimeSource {
       const results = [];
       const seenIds = new Set();
 
-      // Look for links to /anime/ pages
-      const linkRegex = /<a\s[^>]*href\s*=\s*["']([^"']*\/anime\/[^"']*)["'][^>]*>/gi;
+      const linkRegex = /<a\s[^>]*href\s*=\s*["']([^"']*\/drama\/[^"']*)["'][^>]*>/gi;
       let m;
       while ((m = linkRegex.exec(html)) !== null) {
         const link = decodeEntities(m[1]);
@@ -288,14 +209,14 @@ export class VoiranimeSource {
           id: slug,
           title: slug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
           cover: "",
-          type: "TV",
+          type: "Drama",
           year: null,
         });
       }
 
       return results;
     } catch (e) {
-      console.warn("[voiranime] WP search fallback error:", e);
+      console.warn("[voirdrama] WP search fallback error:", e);
       return [];
     }
   }
@@ -311,23 +232,20 @@ export class VoiranimeSource {
       const results = [];
       const seenIds = new Set();
 
-      // Each anime card is inside <div class="page-item-detail">
       const cardRegex = /class\s*=\s*["'][^"']*page-item-detail[^"']*["'][^>]*>([\s\S]*?)(?=<div[^>]*class\s*=\s*["'][^"']*page-item-detail|$)/gi;
       let cardMatch;
       while ((cardMatch = cardRegex.exec(html)) !== null) {
         const card = cardMatch[1];
 
-        // Anime link and title from post-title
         const titleMatch = card.match(/class\s*=\s*["'][^"']*post-title[^"']*["'][^>]*>[\s\S]*?<a\s[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i);
         if (!titleMatch) continue;
 
-        const animeUrl = decodeEntities(titleMatch[1]);
+        const dramaUrl = decodeEntities(titleMatch[1]);
         const title = decodeEntities(stripTags(titleMatch[2]));
-        const slug = this._slugFromUrl(animeUrl);
+        const slug = this._slugFromUrl(dramaUrl);
         if (!slug || seenIds.has(slug)) continue;
         seenIds.add(slug);
 
-        // Latest episode link from list-chapter or chapter
         let latestEpNumber = null;
         let latestEpId = null;
         const chapterMatch = card.match(/class\s*=\s*["'][^"']*(?:list-chapter|chapter)[^"']*["'][\s\S]*?<a\s[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i);
@@ -338,21 +256,18 @@ export class VoiranimeSource {
           latestEpId = this._episodeIdFromUrl(epHref);
         }
 
-        // Rating
-        let rating = null;
-        const ratingMatch = card.match(/class\s*=\s*["'][^"']*(?:total_votes|score|rating)[^"']*["'][^>]*>([\s\S]*?)<\//i);
-        if (ratingMatch) {
-          const num = parseFloat(stripTags(ratingMatch[1]));
-          if (!isNaN(num)) rating = num;
-        }
+        // Try to get cover image (best quality from srcset)
+        let cover = "";
+        const imgTag = card.match(/<img[^>]*class\s*=\s*["'][^"']*img-responsive[^"']*["'][^>]*>/i);
+        if (imgTag) cover = bestCover(imgTag[0]);
 
         results.push({
           id: slug,
           title,
-          cover: "", // no cover — placeholder with initials will show
-          type: "TV",
+          cover,
+          type: "Drama",
           year: null,
-          rating,
+          rating: null,
           latestEpisode: latestEpNumber,
           latestEpisodeId: latestEpId,
         });
@@ -360,65 +275,81 @@ export class VoiranimeSource {
 
       return results;
     } catch (e) {
-      console.error("[voiranime] Error fetching latest episodes:", e);
+      console.error("[voirdrama] Error fetching latest episodes:", e);
       return [];
     }
   }
 
-  // ── Current season anime (Jikan) ─────────────────────────
+  // ── Drama catalogue (currently airing — from homepage) ────
 
   async getSeasonAnime() {
     try {
-      const allAnime = [];
-      const MAX_PAGES = 4; // up to 100 anime (25 per page)
+      // The homepage shows dramas with recent episode updates = currently airing
+      const resp = await fetch(BASE + "/", { headers: HEADERS });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const html = await resp.text();
 
-      for (let page = 1; page <= MAX_PAGES; page++) {
-        const resp = await fetch(`${JIKAN_BASE}/seasons/now?limit=25&sfw=true&page=${page}`);
-        if (!resp.ok) break;
-        const data = await resp.json();
-        const items = data.data || [];
-        if (items.length === 0) break;
+      const results = [];
+      const seenIds = new Set();
 
-        for (const a of items) {
-          allAnime.push({
-            id: `jikan-${a.mal_id}`,
-            title: a.title || a.title_english || '',
-            titleEnglish: a.title_english || '',
-            cover: a.images?.jpg?.large_image_url || '',
-            source: 'jikan',
-            score: a.score || null,
-            episodes: a.episodes || null,
-            airedEpisodes: a.episodes_aired || null,
-            status: a.status || '',
-            synopsis: a.synopsis || '',
-          });
+      const cardRegex = /class\s*=\s*["'][^"']*page-item-detail[^"']*["'][^>]*>([\s\S]*?)(?=<div[^>]*class\s*=\s*["'][^"']*page-item-detail|$)/gi;
+      let cardMatch;
+      while ((cardMatch = cardRegex.exec(html)) !== null) {
+        const card = cardMatch[1];
+
+        const titleMatch = card.match(/class\s*=\s*["'][^"']*post-title[^"']*["'][^>]*>[\s\S]*?<a\s[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i);
+        if (!titleMatch) continue;
+
+        const dramaUrl = decodeEntities(titleMatch[1]);
+        const title = decodeEntities(stripTags(titleMatch[2]));
+        const slug = this._slugFromUrl(dramaUrl);
+        if (!slug || seenIds.has(slug)) continue;
+        seenIds.add(slug);
+
+        // Cover image (best quality from srcset)
+        let cover = "";
+        const imgTag = card.match(/<img[^>]*class\s*=\s*["'][^"']*img-responsive[^"']*["'][^>]*>/i);
+        if (imgTag) cover = bestCover(imgTag[0]);
+
+        // Latest episode info
+        let latestEpNumber = null;
+        const chapterMatch = card.match(/class\s*=\s*["'][^"']*(?:list-chapter|chapter)[^"']*["'][\s\S]*?<a\s[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i);
+        if (chapterMatch) {
+          const epText = stripTags(chapterMatch[2]);
+          latestEpNumber = this._extractEpisodeNumber(epText, chapterMatch[1]);
         }
 
-        // Stop if no more pages
-        if (!data.pagination?.has_next_page) break;
-        // Jikan rate limit: ~3 req/s
-        if (page < MAX_PAGES) await new Promise((r) => setTimeout(r, 350));
+        results.push({
+          id: slug,
+          title,
+          cover,
+          source: "voirdrama",
+          score: null,
+          episodes: null,
+          airedEpisodes: latestEpNumber,
+          status: "",
+          synopsis: "",
+        });
       }
 
-      return allAnime;
+      return results;
     } catch (e) {
-      console.error("[voiranime] Error fetching season anime:", e);
+      console.error("[voirdrama] Error fetching drama catalogue:", e);
       return [];
     }
   }
 
   // ── Episodes ──────────────────────────────────────────────
 
-  async getEpisodes(animeId) {
-    const url = `${BASE}/anime/${animeId}/`;
+  async getEpisodes(dramaId) {
+    const url = `${BASE}/drama/${dramaId}/`;
     const resp = await fetch(url, { headers: HEADERS });
     if (!resp.ok)
-      throw new Error(`Failed to fetch anime page: HTTP ${resp.status}`);
+      throw new Error(`Failed to fetch drama page: HTTP ${resp.status}`);
 
     const html = await resp.text();
     const episodes = [];
 
-    // Match <li class="wp-manga-chapter"> ... <a href="...">text</a> ... </li>
     const liRegex = /<li\s[^>]*class\s*=\s*["'][^"']*wp-manga-chapter[^"']*["'][^>]*>([\s\S]*?)<\/li>/gi;
     let liMatch;
     while ((liMatch = liRegex.exec(html)) !== null) {
@@ -438,31 +369,31 @@ export class VoiranimeSource {
     return episodes;
   }
 
-  // ── Anime Info ─────────────────────────────────────────────
+  // ── Drama Info ─────────────────────────────────────────────
 
-  async getAnimeInfo(animeId) {
+  async getAnimeInfo(dramaId) {
     try {
-      const url = `${BASE}/anime/${animeId}/`;
+      const url = `${BASE}/drama/${dramaId}/`;
       const resp = await fetch(url, { headers: HEADERS });
       if (!resp.ok) return null;
 
       const html = await resp.text();
 
-      // Title from <div class="post-title"><h1>...</h1></div>
-      let title = animeId.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+      let title = dramaId.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
       const titleMatch = html.match(
         /class\s*=\s*["'][^"']*post-title[^"']*["'][^>]*>\s*<h[13][^>]*>([\s\S]*?)<\/h[13]>/i
       );
       if (titleMatch) {
-        // Remove <span> tags (badges like "VOSTFR")
         let titleHtml = titleMatch[1].replace(/<span[^>]*>[\s\S]*?<\/span>/gi, "");
         title = stripTags(titleHtml) || title;
       }
 
-      const cover = await this._fetchCoverForAnime({ id: animeId, title });
+      // Get cover from page (best quality from srcset)
+      let cover = "";
+      const coverImgTag = html.match(/class\s*=\s*["'][^"']*summary_image[^"']*["'][^>]*>[\s\S]*?(<img[^>]*>)/i);
+      if (coverImgTag) cover = bestCover(coverImgTag[1]);
 
-      // Type & year from post-content items
-      let animeType = "TV";
+      let dramaType = "Drama";
       let year = null;
 
       const contentItems = matchAll(
@@ -475,22 +406,21 @@ export class VoiranimeSource {
         if (!headingMatch) continue;
 
         const label = stripTags(headingMatch[1]).toLowerCase();
-        // Get the content after the heading
         const contentMatch = text.match(/summary-content[^>]*>([\s\S]*?)<\//i);
         if (!contentMatch) continue;
         const value = stripTags(contentMatch[1]);
 
         if (label.includes("type")) {
-          animeType = value;
+          dramaType = value;
         } else if (label.includes("année") || label.includes("year") || label.includes("date")) {
           const ym = value.match(/\d{4}/);
           if (ym) year = parseInt(ym[0], 10);
         }
       }
 
-      return { id: animeId, title: decodeEntities(title), cover: cover || "", type: animeType, year };
+      return { id: dramaId, title: decodeEntities(title), cover, type: dramaType, year };
     } catch (e) {
-      console.error(`[voiranime] Error getting anime info for ${animeId}:`, e);
+      console.error(`[voirdrama] Error getting drama info for ${dramaId}:`, e);
       return null;
     }
   }
@@ -498,7 +428,7 @@ export class VoiranimeSource {
   // ── Video URL ─────────────────────────────────────────────
 
   async getVideoUrl(episodeId) {
-    const url = `${BASE}/anime/${episodeId}/`;
+    const url = `${BASE}/drama/${episodeId}/`;
     const resp = await fetch(url, { headers: HEADERS });
     if (!resp.ok)
       throw new Error(`Failed to fetch episode page: HTTP ${resp.status}`);
@@ -542,7 +472,7 @@ export class VoiranimeSource {
       return { url: ajaxUrl, referer: url, headers: { Referer: url }, subtitles: [] };
     }
 
-    // Strategy 4: Direct video tags or URLs in scripts
+    // Strategy 4: Direct video tags
     const videoMatch = html.match(/<video[^>]*>[\s\S]*?<source\s[^>]*src\s*=\s*["']([^"']+)["']/i)
       || html.match(/<video\s[^>]*src\s*=\s*["']([^"']+)["']/i);
     if (videoMatch) {
@@ -573,7 +503,7 @@ export class VoiranimeSource {
       if (urlLower.includes("voe")) return this._extractVoe(html);
       return this._extractGenericVideoUrl(html);
     } catch (e) {
-      console.warn(`[voiranime] Error resolving embed ${embedUrl}:`, e);
+      console.warn(`[voirdrama] Error resolving embed ${embedUrl}:`, e);
       return null;
     }
   }
@@ -666,7 +596,6 @@ export class VoiranimeSource {
   }
 
   _findIframeVideo(html) {
-    // Find iframes with src — prioritize those in reading/video areas
     const iframeRegex = /<iframe\s[^>]*(?:src|data-src)\s*=\s*["']([^"']+)["'][^>]*>/gi;
     let m;
     while ((m = iframeRegex.exec(html)) !== null) {
@@ -729,162 +658,15 @@ export class VoiranimeSource {
     return null;
   }
 
-  // ── Jikan cover helpers ───────────────────────────────────
-
-  /** Build search terms: titre Voiranime, slug (JP/EN romanisé), noms alternatifs dans le titre */
-  _getJikanSearchTerms(anime) {
-    const terms = new Set();
-    const title = anime.title?.trim() || "";
-    const slug = anime.id || "";
-
-    const cleaned = this._cleanTitle(title).trim();
-    if (cleaned) terms.add(cleaned);
-
-    const slugQuery = slug.replace(/-/g, " ").trim();
-    if (slugQuery && slugQuery.length >= 2) terms.add(slugQuery);
-
-    // Extraire "Titre (Nom original)" ou "Titre – Nom original"
-    const parenMatch = title.match(/\(\s*([^)]{2,80})\s*\)/);
-    if (parenMatch) {
-      const alt = parenMatch[1].trim();
-      if (alt.length >= 2 && !/^\d+$/.test(alt)) terms.add(alt);
-    }
-    const dashMatch = title.match(/[-–—]\s*([^-–—]{2,80})$/);
-    if (dashMatch) {
-      const alt = dashMatch[1].trim();
-      if (alt.length >= 2) terms.add(alt);
-    }
-
-    return [...terms];
-  }
-
-  async _fetchCoverForAnime(anime) {
-    const cacheKey = `anime:${anime.id}`;
-    const cached = await _cacheGet(cacheKey);
-    if (cached) return cached.cover;
-
-    const terms = this._getJikanSearchTerms(anime);
-    for (const q of terms) {
-      const cover = await this._fetchCoverByQuery(q);
-      if (cover) {
-        _cacheSet(cacheKey, cover);
-        return cover;
-      }
-    }
-    _cacheSet(cacheKey, "");
-    return "";
-  }
-
-  async _fetchCoverByQuery(query) {
-    const key = query.toLowerCase().trim();
-    if (!key) return "";
-
-    const cached = await _cacheGet(key);
-    if (cached) return cached.cover;
-
-    await _jikanAcquire();
-    try {
-      const resp = await fetch(
-        `${JIKAN_BASE}/anime?q=${encodeURIComponent(key)}&limit=5&sfw=true`
-      );
-      if (resp.status === 429) return "";
-      if (!resp.ok) {
-        _cacheSet(key, "");
-        return "";
-      }
-      const data = await resp.json();
-      const items = data.data || [];
-      if (items.length === 0) {
-        _cacheSet(key, "");
-        return "";
-      }
-      // Pick the best match by title similarity
-      const best = this._bestJikanMatch(key, items);
-      const cover = best?.images?.jpg?.large_image_url || "";
-      _cacheSet(key, cover);
-      return cover;
-    } catch (e) {
-      _cacheSet(key, "");
-      return "";
-    } finally {
-      _jikanRelease();
-    }
-  }
-
-  /** Pick the Jikan result whose title is closest to the query */
-  _bestJikanMatch(query, items) {
-    const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
-    const q = norm(query);
-    let bestItem = items[0];
-    let bestScore = -1;
-
-    for (const item of items) {
-      // Check all available titles
-      const candidates = [
-        item.title,
-        item.title_english,
-        item.title_japanese,
-        ...(item.title_synonyms || []),
-      ].filter(Boolean);
-
-      for (const t of candidates) {
-        const n = norm(t);
-        // Exact match
-        if (n === q) return item;
-        // Score: longest common prefix ratio + inclusion bonus
-        let score = 0;
-        const shorter = q.length <= n.length ? q : n;
-        const longer = q.length > n.length ? q : n;
-        // Inclusion: query is contained in title or vice versa
-        if (longer.includes(shorter)) {
-          score = shorter.length / longer.length;
-        } else {
-          // Common prefix length
-          let cp = 0;
-          while (cp < shorter.length && shorter[cp] === longer[cp]) cp++;
-          score = cp / longer.length * 0.5;
-        }
-        if (score > bestScore) {
-          bestScore = score;
-          bestItem = item;
-        }
-      }
-    }
-    return bestItem;
-  }
-
-  async _enrichCovers(results) {
-    for (const r of results) {
-      const cover = await this._fetchCoverForAnime(r);
-      if (cover) r.cover = cover;
-    }
-  }
-
-  async _fetchCover(title) {
-    return this._fetchCoverByQuery(this._cleanTitle(title || ""));
-  }
-
-  _cleanTitle(title) {
-    title = title.replace(/\s*[-–]\s*(VOSTFR|VF|vostfr|vf)\s*$/, "");
-    title = title.replace(/\s+(VOSTFR|VF|vostfr|vf)\s*$/, "");
-    title = title.replace(/\s*(Saison|Season|S)\s*\d+\s*$/i, "");
-    title = title.replace(/\s*(Part|Partie|Cour)\s*\d+\s*$/i, "");
-    title = title.replace(/\s*\(\d{4}\)\s*$/, "");
-    title = title.replace(/\s*[-–]\s*\d+\s*$/, "");
-    title = title.replace(/\s*Episode\s*\d+\s*$/i, "");
-    title = title.replace(/^[\s\-–—:]+|[\s\-–—:]+$/g, "");
-    return title;
-  }
-
   // ── URL helpers ───────────────────────────────────────────
 
   _slugFromUrl(url) {
-    const m = url.match(/\/anime\/([^/]+)\/?$/);
+    const m = url.match(/\/drama\/([^/]+)\/?$/);
     return m ? m[1] : null;
   }
 
   _episodeIdFromUrl(url) {
-    const m = url.match(/\/anime\/(.+?)\/?$/);
+    const m = url.match(/\/drama\/(.+?)\/?$/);
     return m ? m[1].replace(/\/+$/, "") : url;
   }
 
@@ -892,7 +674,13 @@ export class VoiranimeSource {
     let m = text.match(/[-–]\s*(\d{1,4})(?:x\d+)*\s*(?:VOSTFR|VF|vostfr|vf)/);
     if (m) return parseInt(m[1], 10);
 
+    m = text.match(/[Ee]pisode\s*(\d{1,4})/i);
+    if (m) return parseInt(m[1], 10);
+
     m = href.match(/-(\d{1,4})(?:x\d+)*-(?:vostfr|vf)/i);
+    if (m) return parseInt(m[1], 10);
+
+    m = href.match(/episode-(\d{1,4})/i);
     if (m) return parseInt(m[1], 10);
 
     const nums = text.match(/\d+/g);

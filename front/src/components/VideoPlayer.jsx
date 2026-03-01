@@ -33,6 +33,7 @@ export default function VideoPlayer({
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const isMobileApp = typeof window !== 'undefined' && !!window.__ANIMEHUB_MOBILE__;
   const [showControls, setShowControls] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [videoError, setVideoError] = useState(null);
@@ -303,15 +304,17 @@ export default function VideoPlayer({
                 Suivant
               </button>
             )}
-            <button
-              onClick={toggleFullscreen}
-              className="p-2 rounded-lg hover:bg-white/10 transition"
-            >
-              {isFullscreen
-                ? <Minimize className="w-4 h-4 text-white" />
-                : <Maximize className="w-4 h-4 text-white" />
-              }
-            </button>
+            {!isMobileApp && (
+              <button
+                onClick={toggleFullscreen}
+                className="p-2 rounded-lg hover:bg-white/10 transition"
+              >
+                {isFullscreen
+                  ? <Minimize className="w-4 h-4 text-white" />
+                  : <Maximize className="w-4 h-4 text-white" />
+                }
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -360,15 +363,17 @@ export default function VideoPlayer({
                 Suivant
               </button>
             )}
-            <button
-              onClick={toggleFullscreen}
-              className="p-2 rounded-lg hover:bg-white/10 transition"
-            >
-              {isFullscreen
-                ? <Minimize className="w-4 h-4 text-white" />
-                : <Maximize className="w-4 h-4 text-white" />
-              }
-            </button>
+            {!isMobileApp && (
+              <button
+                onClick={toggleFullscreen}
+                className="p-2 rounded-lg hover:bg-white/10 transition"
+              >
+                {isFullscreen
+                  ? <Minimize className="w-4 h-4 text-white" />
+                  : <Maximize className="w-4 h-4 text-white" />
+                }
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -687,16 +692,18 @@ export default function VideoPlayer({
                 </button>
               )}
 
-              {/* Fullscreen */}
-              <button
-                onClick={(e) => { e.stopPropagation(); toggleFullscreen(); }}
-                className="p-2 rounded-lg hover:bg-white/10 transition"
-              >
-                {isFullscreen
-                  ? <Minimize className="w-4 h-4 text-white" />
-                  : <Maximize className="w-4 h-4 text-white" />
-                }
-              </button>
+              {/* Fullscreen — hidden on mobile app (already fullscreen) */}
+              {!isMobileApp && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); toggleFullscreen(); }}
+                  className="p-2 rounded-lg hover:bg-white/10 transition"
+                >
+                  {isFullscreen
+                    ? <Minimize className="w-4 h-4 text-white" />
+                    : <Maximize className="w-4 h-4 text-white" />
+                  }
+                </button>
+              )}
             </div>
           </div>
         </div>

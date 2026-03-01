@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "AnimeHub Source",
-  "version": "1.0.17",
-  "description": "Fournit les sources anime pour AnimeHub",
+  "version": "1.1.0",
+  "description": "Fournit les sources anime et drama pour AnimeHub",
   "browser_specific_settings": {
     "gecko": {
       "id": "animehub-source@animehub",
@@ -17,7 +17,8 @@
     "https://*.voe.sx/*",
     "https://*.f16px.com/*",
     "https://*.streamtape.com/*",
-    "https://api.jikan.moe/*"
+    "https://api.jikan.moe/*",
+    "https://voirdrama.tv/*"
   ],
   "background": {
     "scripts": ["background.js"],

@@ -1,16 +1,18 @@
 /**
- * Voiranime.com source plugin — JS port of back/sources/voiranime.py
+ * Voiranime.com source plugin — Mobile (React Native) version
  *
- * IMPORTANT: This runs in a Chrome extension SERVICE WORKER.
- * No DOM APIs (DOMParser, document, etc.) — all HTML parsing is regex-based.
+ * Adapted from extension/sources/voiranime.js
+ * Changes: IndexedDB → AsyncStorage for persistent cover cache
  */
+
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const BASE = "https://v6.voiranime.com";
 const JIKAN_BASE = "https://api.jikan.moe/v4";
 
 const HEADERS = {
   "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
   Accept:
     "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
   "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
@@ -19,76 +21,42 @@ const HEADERS = {
 
 const HOST_PRIORITY = ["vidmoly", "voe", "f16px", "streamtape", "mail.ru"];
 
-// Cover cache: in-memory (fast) + IndexedDB (persistent across sessions)
+// Cover cache: in-memory (fast) + AsyncStorage (persistent)
 const _memCache = {};
-const COVER_TTL = 86400000 * 7; // 7 days for successful covers
-const COVER_ERROR_TTL = 10000; // 10s for errors (retry quickly)
-const DB_NAME = "animehub_covers";
-const DB_STORE = "covers";
-let _db = null;
-
-async function _openDB() {
-  if (_db) return _db;
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains(DB_STORE)) {
-        db.createObjectStore(DB_STORE, { keyPath: "key" });
-      }
-    };
-    req.onsuccess = () => { _db = req.result; resolve(_db); };
-    req.onerror = () => reject(req.error);
-  });
-}
-
-async function _dbGet(key) {
-  try {
-    const db = await _openDB();
-    return new Promise((resolve) => {
-      const tx = db.transaction(DB_STORE, "readonly");
-      const req = tx.objectStore(DB_STORE).get(key);
-      req.onsuccess = () => resolve(req.result || null);
-      req.onerror = () => resolve(null);
-    });
-  } catch { return null; }
-}
-
-async function _dbSet(key, cover) {
-  try {
-    const db = await _openDB();
-    const tx = db.transaction(DB_STORE, "readwrite");
-    tx.objectStore(DB_STORE).put({ key, cover, at: Date.now() });
-  } catch { /* ignore */ }
-}
+const COVER_TTL = 86400000 * 7; // 7 days
+const COVER_ERROR_TTL = 10000; // 10s
 
 async function _cacheGet(key) {
-  // 1. In-memory (instant)
+  // 1. In-memory
   const mem = _memCache[key];
   if (mem) {
     const ttl = mem.cover ? COVER_TTL : COVER_ERROR_TTL;
     if (Date.now() - mem.at < ttl) return mem;
   }
-  // 2. IndexedDB (persistent)
-  const stored = await _dbGet(key);
-  if (stored) {
-    const ttl = stored.cover ? COVER_TTL : COVER_ERROR_TTL;
-    if (Date.now() - stored.at < ttl) {
-      _memCache[key] = stored; // promote to memory
-      return stored;
+  // 2. AsyncStorage
+  try {
+    const raw = await AsyncStorage.getItem(`cover:${key}`);
+    if (raw) {
+      const stored = JSON.parse(raw);
+      const ttl = stored.cover ? COVER_TTL : COVER_ERROR_TTL;
+      if (Date.now() - stored.at < ttl) {
+        _memCache[key] = stored;
+        return stored;
+      }
     }
-  }
+  } catch { /* ignore */ }
   return null;
 }
 
 function _cacheSet(key, cover) {
   const entry = { key, cover, at: Date.now() };
   _memCache[key] = entry;
-  // Only persist successful covers to IndexedDB (not errors)
-  if (cover) _dbSet(key, cover);
+  if (cover) {
+    AsyncStorage.setItem(`cover:${key}`, JSON.stringify(entry)).catch(() => {});
+  }
 }
 
-// Jikan: max 3 concurrent, 200ms between starts (Jikan allows 3 req/s)
+// Jikan rate limiting
 const JIKAN_CONCURRENCY = 3;
 const JIKAN_DELAY_MS = 200;
 let _jikanInFlight = 0;
@@ -112,7 +80,6 @@ function _jikanRelease() {
 
 // ── Regex HTML helpers ──────────────────────────────────────
 
-/** Extract all matches of a regex, returning array of match arrays */
 function matchAll(html, regex) {
   const results = [];
   let m;
@@ -121,18 +88,10 @@ function matchAll(html, regex) {
   return results;
 }
 
-/** Extract attribute value from an HTML tag string */
-function getAttr(tag, attr) {
-  const m = tag.match(new RegExp(`${attr}\\s*=\\s*["']([^"']*)["']`, "i"));
-  return m ? m[1] : null;
-}
-
-/** Strip HTML tags, return text content */
 function stripTags(html) {
   return html.replace(/<[^>]*>/g, "").trim();
 }
 
-/** Decode common HTML entities */
 function decodeEntities(str) {
   return str
     .replace(/&amp;/g, "&")
@@ -153,7 +112,6 @@ export class VoiranimeSource {
     const results = [];
     const seenIds = new Set();
 
-    // Run both Ajax Search Pro requests in parallel (VOSTFR id=3, VF id=2)
     const searchPromises = [3, 2].map(async (searchId) => {
       try {
         const body = new URLSearchParams({
@@ -195,14 +153,9 @@ export class VoiranimeSource {
       results.push(...fallback);
     }
 
-    // Return results immediately — covers will be fetched by enrichCoversAsync
     return results;
   }
 
-  /**
-   * Enrich covers via Jikan. onUpdate reçoit uniquement les animes modifiés { id, source, cover }
-   * pour éviter les re-renders en cascade et les rechargements d’images inutiles.
-   */
   async enrichCoversAsync(results, onUpdate) {
     const pending = [];
     let scheduled = null;
@@ -232,7 +185,6 @@ export class VoiranimeSource {
   }
 
   _parseSearchResults(html, seenIds, results) {
-    // Find all <a> tags with href containing /anime/
     const linkRegex = /<a\s[^>]*href\s*=\s*["']([^"']*\/anime\/[^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
     let m;
     while ((m = linkRegex.exec(html)) !== null) {
@@ -243,16 +195,10 @@ export class VoiranimeSource {
       if (!slug || seenIds.has(slug)) continue;
       seenIds.add(slug);
 
-      // Try to get title from <h3> inside, or from link text
       let title = null;
       const h3Match = innerHtml.match(/<h3[^>]*>([\s\S]*?)<\/h3>/i);
-      if (h3Match) {
-        title = stripTags(h3Match[1]);
-      }
-      if (!title) {
-        title = stripTags(innerHtml);
-      }
-
+      if (h3Match) title = stripTags(h3Match[1]);
+      if (!title) title = stripTags(innerHtml);
       if (!title) title = slug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
       results.push({
@@ -275,7 +221,6 @@ export class VoiranimeSource {
       const results = [];
       const seenIds = new Set();
 
-      // Look for links to /anime/ pages
       const linkRegex = /<a\s[^>]*href\s*=\s*["']([^"']*\/anime\/[^"']*)["'][^>]*>/gi;
       let m;
       while ((m = linkRegex.exec(html)) !== null) {
@@ -311,13 +256,11 @@ export class VoiranimeSource {
       const results = [];
       const seenIds = new Set();
 
-      // Each anime card is inside <div class="page-item-detail">
       const cardRegex = /class\s*=\s*["'][^"']*page-item-detail[^"']*["'][^>]*>([\s\S]*?)(?=<div[^>]*class\s*=\s*["'][^"']*page-item-detail|$)/gi;
       let cardMatch;
       while ((cardMatch = cardRegex.exec(html)) !== null) {
         const card = cardMatch[1];
 
-        // Anime link and title from post-title
         const titleMatch = card.match(/class\s*=\s*["'][^"']*post-title[^"']*["'][^>]*>[\s\S]*?<a\s[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i);
         if (!titleMatch) continue;
 
@@ -327,7 +270,6 @@ export class VoiranimeSource {
         if (!slug || seenIds.has(slug)) continue;
         seenIds.add(slug);
 
-        // Latest episode link from list-chapter or chapter
         let latestEpNumber = null;
         let latestEpId = null;
         const chapterMatch = card.match(/class\s*=\s*["'][^"']*(?:list-chapter|chapter)[^"']*["'][\s\S]*?<a\s[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i);
@@ -338,7 +280,6 @@ export class VoiranimeSource {
           latestEpId = this._episodeIdFromUrl(epHref);
         }
 
-        // Rating
         let rating = null;
         const ratingMatch = card.match(/class\s*=\s*["'][^"']*(?:total_votes|score|rating)[^"']*["'][^>]*>([\s\S]*?)<\//i);
         if (ratingMatch) {
@@ -349,7 +290,7 @@ export class VoiranimeSource {
         results.push({
           id: slug,
           title,
-          cover: "", // no cover — placeholder with initials will show
+          cover: "",
           type: "TV",
           year: null,
           rating,
@@ -370,7 +311,7 @@ export class VoiranimeSource {
   async getSeasonAnime() {
     try {
       const allAnime = [];
-      const MAX_PAGES = 4; // up to 100 anime (25 per page)
+      const MAX_PAGES = 4;
 
       for (let page = 1; page <= MAX_PAGES; page++) {
         const resp = await fetch(`${JIKAN_BASE}/seasons/now?limit=25&sfw=true&page=${page}`);
@@ -394,9 +335,7 @@ export class VoiranimeSource {
           });
         }
 
-        // Stop if no more pages
         if (!data.pagination?.has_next_page) break;
-        // Jikan rate limit: ~3 req/s
         if (page < MAX_PAGES) await new Promise((r) => setTimeout(r, 350));
       }
 
@@ -412,13 +351,11 @@ export class VoiranimeSource {
   async getEpisodes(animeId) {
     const url = `${BASE}/anime/${animeId}/`;
     const resp = await fetch(url, { headers: HEADERS });
-    if (!resp.ok)
-      throw new Error(`Failed to fetch anime page: HTTP ${resp.status}`);
+    if (!resp.ok) throw new Error(`Failed to fetch anime page: HTTP ${resp.status}`);
 
     const html = await resp.text();
     const episodes = [];
 
-    // Match <li class="wp-manga-chapter"> ... <a href="...">text</a> ... </li>
     const liRegex = /<li\s[^>]*class\s*=\s*["'][^"']*wp-manga-chapter[^"']*["'][^>]*>([\s\S]*?)<\/li>/gi;
     let liMatch;
     while ((liMatch = liRegex.exec(html)) !== null) {
@@ -448,20 +385,17 @@ export class VoiranimeSource {
 
       const html = await resp.text();
 
-      // Title from <div class="post-title"><h1>...</h1></div>
       let title = animeId.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
       const titleMatch = html.match(
         /class\s*=\s*["'][^"']*post-title[^"']*["'][^>]*>\s*<h[13][^>]*>([\s\S]*?)<\/h[13]>/i
       );
       if (titleMatch) {
-        // Remove <span> tags (badges like "VOSTFR")
         let titleHtml = titleMatch[1].replace(/<span[^>]*>[\s\S]*?<\/span>/gi, "");
         title = stripTags(titleHtml) || title;
       }
 
       const cover = await this._fetchCoverForAnime({ id: animeId, title });
 
-      // Type & year from post-content items
       let animeType = "TV";
       let year = null;
 
@@ -475,7 +409,6 @@ export class VoiranimeSource {
         if (!headingMatch) continue;
 
         const label = stripTags(headingMatch[1]).toLowerCase();
-        // Get the content after the heading
         const contentMatch = text.match(/summary-content[^>]*>([\s\S]*?)<\//i);
         if (!contentMatch) continue;
         const value = stripTags(contentMatch[1]);
@@ -500,12 +433,10 @@ export class VoiranimeSource {
   async getVideoUrl(episodeId) {
     const url = `${BASE}/anime/${episodeId}/`;
     const resp = await fetch(url, { headers: HEADERS });
-    if (!resp.ok)
-      throw new Error(`Failed to fetch episode page: HTTP ${resp.status}`);
+    if (!resp.ok) throw new Error(`Failed to fetch episode page: HTTP ${resp.status}`);
 
     const html = await resp.text();
 
-    // Strategy 1: Parse thisChapterSources
     const sources = this._parseChapterSources(html);
     if (sources.length > 0) {
       for (const src of sources) {
@@ -530,19 +461,16 @@ export class VoiranimeSource {
       };
     }
 
-    // Strategy 2: iframe in page
     const iframeUrl = this._findIframeVideo(html);
     if (iframeUrl) {
       return { url: iframeUrl, referer: url, headers: { Referer: url }, subtitles: [] };
     }
 
-    // Strategy 3: AJAX reading content
     const ajaxUrl = await this._tryAjaxReadingContent(episodeId, html);
     if (ajaxUrl) {
       return { url: ajaxUrl, referer: url, headers: { Referer: url }, subtitles: [] };
     }
 
-    // Strategy 4: Direct video tags or URLs in scripts
     const videoMatch = html.match(/<video[^>]*>[\s\S]*?<source\s[^>]*src\s*=\s*["']([^"']+)["']/i)
       || html.match(/<video\s[^>]*src\s*=\s*["']([^"']+)["']/i);
     if (videoMatch) {
@@ -666,7 +594,6 @@ export class VoiranimeSource {
   }
 
   _findIframeVideo(html) {
-    // Find iframes with src — prioritize those in reading/video areas
     const iframeRegex = /<iframe\s[^>]*(?:src|data-src)\s*=\s*["']([^"']+)["'][^>]*>/gi;
     let m;
     while ((m = iframeRegex.exec(html)) !== null) {
@@ -731,7 +658,6 @@ export class VoiranimeSource {
 
   // ── Jikan cover helpers ───────────────────────────────────
 
-  /** Build search terms: titre Voiranime, slug (JP/EN romanisé), noms alternatifs dans le titre */
   _getJikanSearchTerms(anime) {
     const terms = new Set();
     const title = anime.title?.trim() || "";
@@ -743,7 +669,6 @@ export class VoiranimeSource {
     const slugQuery = slug.replace(/-/g, " ").trim();
     if (slugQuery && slugQuery.length >= 2) terms.add(slugQuery);
 
-    // Extraire "Titre (Nom original)" ou "Titre – Nom original"
     const parenMatch = title.match(/\(\s*([^)]{2,80})\s*\)/);
     if (parenMatch) {
       const alt = parenMatch[1].trim();
@@ -798,7 +723,6 @@ export class VoiranimeSource {
         _cacheSet(key, "");
         return "";
       }
-      // Pick the best match by title similarity
       const best = this._bestJikanMatch(key, items);
       const cover = best?.images?.jpg?.large_image_url || "";
       _cacheSet(key, cover);
@@ -811,7 +735,6 @@ export class VoiranimeSource {
     }
   }
 
-  /** Pick the Jikan result whose title is closest to the query */
   _bestJikanMatch(query, items) {
     const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
     const q = norm(query);
@@ -819,7 +742,6 @@ export class VoiranimeSource {
     let bestScore = -1;
 
     for (const item of items) {
-      // Check all available titles
       const candidates = [
         item.title,
         item.title_english,
@@ -829,17 +751,13 @@ export class VoiranimeSource {
 
       for (const t of candidates) {
         const n = norm(t);
-        // Exact match
         if (n === q) return item;
-        // Score: longest common prefix ratio + inclusion bonus
         let score = 0;
         const shorter = q.length <= n.length ? q : n;
         const longer = q.length > n.length ? q : n;
-        // Inclusion: query is contained in title or vice versa
         if (longer.includes(shorter)) {
           score = shorter.length / longer.length;
         } else {
-          // Common prefix length
           let cp = 0;
           while (cp < shorter.length && shorter[cp] === longer[cp]) cp++;
           score = cp / longer.length * 0.5;
@@ -851,17 +769,6 @@ export class VoiranimeSource {
       }
     }
     return bestItem;
-  }
-
-  async _enrichCovers(results) {
-    for (const r of results) {
-      const cover = await this._fetchCoverForAnime(r);
-      if (cover) r.cover = cover;
-    }
-  }
-
-  async _fetchCover(title) {
-    return this._fetchCoverByQuery(this._cleanTitle(title || ""));
   }
 
   _cleanTitle(title) {

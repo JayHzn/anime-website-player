@@ -37,6 +37,12 @@ export default function HomePage() {
           return p ? { ...a, cover: p.cover } : a;
         })
       );
+      setSeasonAnime((prev) =>
+        prev.map((a) => {
+          const p = patches.find((x) => x.id === a.id && x.source === a.source);
+          return p ? { ...a, cover: p.cover } : a;
+        })
+      );
       // Clear image errors for covers that just got updated
       setImgErrors((prev) => {
         const updated = new Set(prev);
@@ -67,17 +73,20 @@ export default function HomePage() {
     return () => clearInterval(timer);
   }, [searchResults, latestEpisodes, selectedSource]);
 
-  // Season cache helpers (localStorage, TTL = 30 days)
-  const SEASON_CACHE_KEY = 'seasonAnimeCache';
+  // Season cache helpers (localStorage, TTL = 30 days, per-source)
   const SEASON_CACHE_TTL = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+  function getSeasonCacheKey() {
+    return `seasonCache_${selectedSource || 'voiranime'}`;
+  }
 
   function getCachedSeason() {
     try {
-      const raw = localStorage.getItem(SEASON_CACHE_KEY);
+      const raw = localStorage.getItem(getSeasonCacheKey());
       if (!raw) return null;
       const { data, ts } = JSON.parse(raw);
       if (Date.now() - ts > SEASON_CACHE_TTL) {
-        localStorage.removeItem(SEASON_CACHE_KEY);
+        localStorage.removeItem(getSeasonCacheKey());
         return null;
       }
       return data;
@@ -88,7 +97,7 @@ export default function HomePage() {
 
   function setCachedSeason(data) {
     try {
-      localStorage.setItem(SEASON_CACHE_KEY, JSON.stringify({ data, ts: Date.now() }));
+      localStorage.setItem(getSeasonCacheKey(), JSON.stringify({ data, ts: Date.now() }));
     } catch { /* quota exceeded, ignore */ }
   }
 
@@ -105,21 +114,32 @@ export default function HomePage() {
         setSeasonAnime([]);
       }
 
+      const isAnimeSource = !selectedSource || selectedSource === 'voiranime';
+      const isDramaSource = selectedSource === 'voirdrama';
       const [prog, results, latest, season] = await Promise.all([
         api.getProgress(),
         api.search('', selectedSource),
         api.getLatestEpisodes(selectedSource).catch(() => []),
-        cached ? Promise.resolve([]) : api.getSeasonAnime().catch(() => []),
+        !cached ? api.getSeasonAnime(selectedSource).catch(() => []) : Promise.resolve([]),
       ]);
+      // Set season data BEFORE revealing UI so both sections appear together
+      if (!cached && isDramaSource && season.length > 0) {
+        setSeasonAnime(season);
+        setLoadingSeason(false);
+        setCachedSeason(season);
+      } else if (!cached && !isAnimeSource) {
+        setLoadingSeason(false);
+      }
+
       setProgress(prog);
       setSearchResults(results);
       setLatestEpisodes(latest);
       setLoading(false);
 
-      // Resolve season anime against voiranime in background (only if not cached)
-      if (!cached && season.length > 0) {
+      // Anime season resolve is async (batch searches) — start after initial render
+      if (!cached && isAnimeSource && season.length > 0) {
         resolveSeasonAnime(season);
-      } else if (!cached) {
+      } else if (!cached && isAnimeSource && season.length === 0) {
         setLoadingSeason(false);
       }
     } catch (e) {
@@ -137,7 +157,11 @@ export default function HomePage() {
       const batch = season.slice(i, i + BATCH);
       const results = await Promise.allSettled(
         batch.map(async (anime) => {
-          const res = await api.search(anime.title, src);
+          // Try Japanese title first, then English title as fallback
+          let res = await api.search(anime.title, src);
+          if (res.length === 0 && anime.titleEnglish && anime.titleEnglish !== anime.title) {
+            res = await api.search(anime.titleEnglish, src);
+          }
           if (res.length > 0) {
             // Prefer VOSTFR version (no -vf suffix) over VF
             const vostfr = res.find((r) => !r.id.endsWith('-vf'));
@@ -164,8 +188,11 @@ export default function HomePage() {
   }
 
   function goToSeasonAnime(anime) {
+    const state = anime.cover ? { cover: anime.cover } : undefined;
     if (anime.voiranimeId) {
-      navigate(`/anime/${anime.voiranimeSource}/${encodeURIComponent(anime.voiranimeId)}`);
+      navigate(`/anime/${anime.voiranimeSource}/${encodeURIComponent(anime.voiranimeId)}`, { state });
+    } else if (anime.source && anime.source !== 'jikan') {
+      navigate(`/anime/${anime.source}/${encodeURIComponent(anime.id)}`, { state });
     }
   }
 
@@ -300,7 +327,9 @@ export default function HomePage() {
           <div className="flex items-center justify-between mb-5">
             <div className="flex items-center gap-2">
               <Flame className="w-5 h-5 text-orange-400" />
-              <h2 className="font-display font-bold text-xl text-white">Dernières sorties</h2>
+              <h2 className="font-display font-bold text-xl text-white">
+                {selectedSource === 'voirdrama' ? 'Derniers dramas' : 'Dernières sorties'}
+              </h2>
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -406,11 +435,13 @@ export default function HomePage() {
         </section>
       )}
 
-      {/* Season Anime */}
+      {/* Season / Catalogue */}
       <section>
         <div className="flex items-center gap-2 mb-5">
           <Sparkles className="w-5 h-5 text-purple-400" />
-          <h2 className="font-display font-bold text-xl text-white">Animes de la saison</h2>
+          <h2 className="font-display font-bold text-xl text-white">
+            {selectedSource === 'voirdrama' ? 'Catalogue de dramas' : 'Animes de la saison'}
+          </h2>
         </div>
         {seasonAnime.length > 0 ? (
           <>
@@ -486,7 +517,9 @@ export default function HomePage() {
           </div>
         ) : (
           <div className="text-center py-20 text-white/30">
-            <p className="font-display text-lg">Aucun anime de saison trouvé</p>
+            <p className="font-display text-lg">
+              {selectedSource === 'voirdrama' ? 'Aucun drama trouvé' : 'Aucun anime de saison trouvé'}
+            </p>
           </div>
         )}
       </section>

@@ -1,7 +1,9 @@
 import { VoiranimeSource } from "./sources/voiranime.js";
+import { VoirdramaSource } from "./sources/voirdrama.js";
 
 const sources = {
   voiranime: new VoiranimeSource(),
+  voirdrama: new VoirdramaSource(),
 };
 
 // In-memory search cache: { key: { results, at } }
@@ -93,6 +95,17 @@ async function handleAction(action, payload, sender) {
     case "getLatestEpisodes": {
       const latest = await source.getLatestEpisodes();
       for (const r of latest) r.source = sourceName;
+      // Enrich covers in background for voirdrama (hotlink-protected)
+      if (sender?.tab?.id && source.enrichCoversAsync) {
+        const tabId = sender.tab.id;
+        source.enrichCoversAsync([...latest], (patches) => {
+          for (const p of patches) p.source = sourceName;
+          chrome.tabs.sendMessage(tabId, {
+            type: "ANIME_EXT_COVERS_UPDATE",
+            data: patches,
+          }).catch(() => {});
+        });
+      }
       return latest;
     }
     case "retryCovers": {
@@ -113,11 +126,39 @@ async function handleAction(action, payload, sender) {
       }
       return { status: "retrying", count: items.length };
     }
-    case "getSeasonAnime":
-      return await source.getSeasonAnime();
+    case "getSeasonAnime": {
+      const season = await source.getSeasonAnime();
+      if (sender?.tab?.id && source.enrichCoversAsync) {
+        const tabId = sender.tab.id;
+        source.enrichCoversAsync([...season], (patches) => {
+          for (const p of patches) p.source = sourceName;
+          chrome.tabs.sendMessage(tabId, {
+            type: "ANIME_EXT_COVERS_UPDATE",
+            data: patches,
+          }).catch(() => {});
+        });
+      }
+      return season;
+    }
     case "getVideoUrl":
       return await source.getVideoUrl(payload.episodeId);
+    case "proxyImage":
+      return await proxyImageToDataUrl(payload.url, payload.referer);
     default:
       throw new Error(`Action inconnue: ${action}`);
   }
+}
+
+/** Fetch an image via the extension (bypasses hotlink protection) and return as data URL */
+async function proxyImageToDataUrl(url, referer) {
+  if (!url) return "";
+  const headers = { "Referer": referer || new URL(url).origin + "/" };
+  const resp = await fetch(url, { headers });
+  if (!resp.ok) return "";
+  const blob = await resp.blob();
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result);
+    reader.readAsDataURL(blob);
+  });
 }
