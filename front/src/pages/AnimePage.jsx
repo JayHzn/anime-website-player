@@ -72,8 +72,14 @@ export default function AnimePage() {
       } else if (navCover) {
         setAnimeInfo({ id: animeId, title: animeId.replace(/-/g, ' '), cover: navCover, type: '', year: null });
       }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
 
-      // Find alternate VF/VOSTFR version
+    // Find alternate VF/VOSTFR version (non-blocking — don't delay page render)
+    try {
       const isVF = animeId.endsWith('-vf');
       const altLangLabel = isVF ? 'VOSTFR' : 'VF';
 
@@ -83,37 +89,31 @@ export default function AnimePage() {
         const altEps = await api.getEpisodes(source, directSlug);
         if (altEps && altEps.length > 0) {
           setAltLang({ id: directSlug, lang: altLangLabel });
+          return;
         }
-      } catch {
-        // Strategy 2: search by title variants, match closest slug
-        try {
-          const title = info?.title || animeId;
-          const terms = getSearchTerms(title);
-          const baseSlug = isVF ? animeId.replace(/-vf$/, '') : animeId;
+      } catch { /* try strategy 2 */ }
 
-          for (const term of terms) {
-            const searchQuery = isVF ? term : term + ' VF';
-            const results = await api.search(searchQuery, source);
-            const altResult = results.find((r) => {
-              if (r.id === animeId) return false;
-              const rIsVF = r.id.endsWith('-vf');
-              if (rIsVF === isVF) return false;
-              const rBase = rIsVF ? r.id.replace(/-vf$/, '') : r.id;
-              // Must match: same slug or candidate contains our slug (not the reverse — avoids matching season 1 for season 3)
-              return rBase === baseSlug || rBase.includes(baseSlug);
-            });
-            if (altResult) {
-              setAltLang({ id: altResult.id, lang: altLangLabel });
-              break;
-            }
-          }
-        } catch { /* no alt found */ }
+      // Strategy 2: search by title variants, match closest slug
+      const title = animeInfo?.title || animeId;
+      const terms = getSearchTerms(title);
+      const baseSlug = isVF ? animeId.replace(/-vf$/, '') : animeId;
+
+      for (const term of terms) {
+        const searchQuery = isVF ? term : term + ' VF';
+        const results = await api.search(searchQuery, source);
+        const altResult = results.find((r) => {
+          if (r.id === animeId) return false;
+          const rIsVF = r.id.endsWith('-vf');
+          if (rIsVF === isVF) return false;
+          const rBase = rIsVF ? r.id.replace(/-vf$/, '') : r.id;
+          return rBase === baseSlug || rBase.includes(baseSlug);
+        });
+        if (altResult) {
+          setAltLang({ id: altResult.id, lang: altLangLabel });
+          break;
+        }
       }
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
+    } catch { /* no alt found */ }
   }
 
   function playEpisode(episode) {

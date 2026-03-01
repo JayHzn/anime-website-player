@@ -18,7 +18,26 @@
       "Bash(node -c \"import\\(''./c/Users/jason/Documents/Informatique/Projets/anime-website-player/extension/background.js''\\)\")",
       "Bash(node --check /c/Users/jason/Documents/Informatique/Projets/anime-website-player/extension/background.js)",
       "Bash(node -e \":*)",
-      "Bash(docker ps --format \"table {{.Names}}\\\\t{{.Status}}\\\\t{{.Ports}}\")"
+      "Bash(docker ps --format \"table {{.Names}}\\\\t{{.Status}}\\\\t{{.Ports}}\")",
+      "WebFetch(domain:voirdrama.com)",
+      "WebFetch(domain:voirdrama.org)",
+      "WebFetch(domain:voirdrama.city)",
+      "WebFetch(domain:voirdrama.tv)",
+      "WebFetch(domain:localhost)",
+      "Bash(python -c \"import json,sys; data=json.load\\(sys.stdin\\); [print\\(f''{a[\"\"mal_id\"\"]}: {a[\"\"title\"\"]} | {a.get\\(\"\"title_english\"\",\"\"\"\"\\)} | {a[\"\"images\"\"][\"\"jpg\"\"][\"\"large_image_url\"\"]}''\\) for a in data.get\\(''data'',[]\\)]\")",
+      "Bash(node -e \"let d='''';process.stdin.on\\(''data'',c=>d+=c\\);process.stdin.on\\(''end'',\\(\\)=>{const r=JSON.parse\\(d\\);\\(r.data||[]\\).forEach\\(a=>console.log\\(a.mal_id+'': ''+a.title+'' | ''+\\(a.title_english||''''\\)+'' | ''+a.images.jpg.large_image_url\\)\\)}\\)\")",
+      "Bash(npx expo install expo-asset)",
+      "Bash(npx expo install expo@latest --fix)",
+      "Bash(npm install react@19.2.0 react-native@0.83.2)",
+      "Bash(npm install expo@~54.0.0)",
+      "Bash(npx expo install --fix)",
+      "Bash(npx expo install babel-preset-expo)",
+      "Bash(npx expo install expo-screen-orientation)",
+      "Bash(git status -u)",
+      "Bash(git add front/src/components/VideoPlayer.jsx front/src/components/Layout.jsx front/src/pages/HomePage.jsx front/src/pages/AnimePage.jsx front/src/api.js extension/background.js extension/manifest.json extension/manifest.firefox.json extension/sources/voiranime.js extension/sources/voirdrama.js back/sources/voirdrama.py back/main.py mobile/App.js mobile/app.json mobile/babel.config.js mobile/bridge.js mobile/eas.json mobile/package.json mobile/sources/voiranime.js mobile/sources/voirdrama.js mobile/assets/icon.png)",
+      "Bash(git commit:*)",
+      "Bash(git push)",
+      "Bash(ls c:/Users/jason/Documents/Informatique/Projets/anime-website-player/*.js c:/Users/jason/Documents/Informatique/Projets/anime-website-player/*.mjs)"
     ]
   }
 }

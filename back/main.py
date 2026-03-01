@@ -541,7 +541,7 @@ if os.path.isdir(STATIC_DIR):
     async def spa_fallback(full_path: str):
         """SPA fallback: serve index.html for all non-API routes."""
         # Don't catch API routes
-        if full_path.startswith(("api/", "sources", "search", "anime/", "episode/", "progress", "ml/")):
+        if full_path.startswith(("api/", "sources", "search", "episode/", "progress", "ml/")):
             raise HTTPException(404)
         # Serve actual static files if they exist
         file_path = os.path.join(STATIC_DIR, full_path)

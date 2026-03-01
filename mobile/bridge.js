@@ -34,8 +34,23 @@ export const BRIDGE_SCRIPT = `
     nav.navbar-hidden {
       transform: translateY(-100%) !important;
     }
+    /* Disable pinch-to-zoom on the video player */
+    video, .video-container, .video-overlay, [class*="player"], [class*="video"] {
+      touch-action: manipulation !important;
+    }
   \`;
   document.head.appendChild(style);
+
+  // Disable zoom via viewport meta tag
+  var viewport = document.querySelector('meta[name="viewport"]');
+  if (viewport) {
+    viewport.setAttribute('content', viewport.content.replace(/user-scalable\\s*=\\s*\\w+/i, '') + ', user-scalable=no, maximum-scale=1.0');
+  } else {
+    viewport = document.createElement('meta');
+    viewport.name = 'viewport';
+    viewport.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
+    document.head.appendChild(viewport);
+  }
 
   // Auto-hide navbar on scroll (like YouTube)
   var lastScrollY = 0;
