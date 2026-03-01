@@ -34,6 +34,9 @@ export const BRIDGE_SCRIPT = `
     nav.navbar-hidden {
       transform: translateY(-100%) !important;
     }
+    /* Hide scrollbar — native app feel */
+    ::-webkit-scrollbar { display: none !important; }
+    * { scrollbar-width: none !important; }
     /* Disable pinch-to-zoom on the video player */
     video, .video-container, .video-overlay, [class*="player"], [class*="video"] {
       touch-action: manipulation !important;

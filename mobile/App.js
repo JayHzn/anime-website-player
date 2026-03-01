@@ -199,6 +199,29 @@ export default function App() {
     [handleAction, sendToWebView]
   );
 
+  // ── Intercept navigations — keep SPA routing client-side ──
+  const handleNavigationRequest = useCallback((request) => {
+    const url = request.url;
+    // Allow initial page load
+    if (url === SITE_URL || url === SITE_URL + "/") return true;
+    // Allow static assets (JS chunks, CSS, images, etc.)
+    if (url.startsWith(SITE_URL + "/assets/")) return true;
+    // For SPA routes, prevent full-page reload — handle via React Router
+    if (url.startsWith(SITE_URL)) {
+      const path = url.replace(SITE_URL, "") || "/";
+      webViewRef.current?.injectJavaScript(`
+        if (window.location.pathname + window.location.search !== '${path}') {
+          window.history.pushState({}, '', '${path}');
+          window.dispatchEvent(new PopStateEvent('popstate'));
+        }
+        true;
+      `);
+      return false;
+    }
+    // Block external navigations (stay in the app)
+    return false;
+  }, []);
+
   // ── Auto-rotate on watch page ──────────────────────────────
   const isOnWatchPage = useRef(false);
 
@@ -244,6 +267,7 @@ export default function App() {
         injectedJavaScript={BRIDGE_SCRIPT}
         onMessage={onMessage}
         onNavigationStateChange={onNavigationStateChange}
+        onShouldStartLoadWithRequest={handleNavigationRequest}
         javaScriptEnabled={true}
         domStorageEnabled={true}
         mediaPlaybackRequiresUserAction={false}

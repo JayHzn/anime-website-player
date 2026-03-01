@@ -43,6 +43,12 @@ export default function VideoPlayer({
   const skipDismissed = useRef(new Set());
   const hideTimeout = useRef(null);
 
+  // ── Mobile double-tap & tap logic ──────────────────────────
+  const lastTap = useRef({ time: 0, x: 0 });
+  const tapTimeout = useRef(null);
+  const [doubleTapSide, setDoubleTapSide] = useState(null); // 'left' | 'right' | null
+  const doubleTapTimer = useRef(null);
+
   // Reset state when video changes
   useEffect(() => {
     setActiveSkip(null);
@@ -232,6 +238,58 @@ export default function VideoPlayer({
     resetHideTimer();
   };
 
+  // Mobile: handle tap (show controls or play/pause) and double-tap (seek)
+  const handleMobileTap = useCallback((e) => {
+    if (!isMobileApp) return;
+    // Ignore taps on buttons/controls
+    if (e.target.closest('button') || e.target.closest('.progress-bar')) return;
+
+    const now = Date.now();
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    const x = (e.touches ? e.changedTouches[0].clientX : e.clientX);
+    const timeDiff = now - lastTap.current.time;
+    const isDoubleTap = timeDiff < 300;
+
+    if (isDoubleTap) {
+      // Cancel pending single-tap
+      if (tapTimeout.current) clearTimeout(tapTimeout.current);
+
+      // Double-tap: seek ±10s based on side
+      const side = x < rect.left + rect.width / 2 ? 'left' : 'right';
+      const video = videoRef.current;
+      if (video) {
+        if (side === 'right') {
+          video.currentTime = Math.min(video.duration, video.currentTime + 10);
+        } else {
+          video.currentTime = Math.max(0, video.currentTime - 10);
+        }
+      }
+
+      // Show visual feedback
+      setDoubleTapSide(side);
+      if (doubleTapTimer.current) clearTimeout(doubleTapTimer.current);
+      doubleTapTimer.current = setTimeout(() => setDoubleTapSide(null), 600);
+
+      lastTap.current = { time: 0, x: 0 };
+      resetHideTimer();
+      return;
+    }
+
+    // Single tap — delay to check for double-tap
+    lastTap.current = { time: now, x };
+    tapTimeout.current = setTimeout(() => {
+      if (!showControls) {
+        // Controls hidden → just show them
+        resetHideTimer();
+      } else {
+        // Controls visible → toggle play/pause
+        togglePlay();
+      }
+    }, 300);
+  }, [isMobileApp, showControls, togglePlay, resetHideTimer]);
+
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
       containerRef.current?.requestFullscreen();
@@ -388,6 +446,10 @@ export default function VideoPlayer({
       style={{ cursor: showControls ? 'default' : 'none' }}
       onMouseMove={resetHideTimer}
       onClick={(e) => {
+        if (isMobileApp) {
+          handleMobileTap(e);
+          return;
+        }
         if (e.target === videoRef.current || e.target.closest('.video-overlay')) {
           togglePlay();
           resetHideTimer();
@@ -433,6 +495,22 @@ export default function VideoPlayer({
       {isLoading && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/60">
           <div className="w-12 h-12 border-3 border-white/20 border-t-accent-primary rounded-full animate-spin" />
+        </div>
+      )}
+
+      {/* Double-tap seek feedback */}
+      {doubleTapSide && (
+        <div
+          className={`absolute top-0 bottom-0 flex items-center justify-center pointer-events-none z-20 ${
+            doubleTapSide === 'right' ? 'right-0 w-1/3' : 'left-0 w-1/3'
+          }`}
+        >
+          <div className="bg-white/20 rounded-full w-20 h-20 flex flex-col items-center justify-center animate-ping-once">
+            <SkipForward className={`w-6 h-6 text-white ${doubleTapSide === 'left' ? 'rotate-180' : ''}`} />
+            <span className="text-white text-xs font-bold mt-0.5">
+              {doubleTapSide === 'right' ? '+10s' : '-10s'}
+            </span>
+          </div>
         </div>
       )}
 
