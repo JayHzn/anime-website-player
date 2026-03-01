@@ -44,7 +44,7 @@ export default function Layout() {
     : 'Toutes';
 
   return (
-    <div className="min-h-screen bg-bg-primary">
+    <div className="min-h-screen">
       {/* Navbar */}
       <nav className="fixed top-0 left-0 right-0 z-50 bg-bg-primary/80 backdrop-blur-xl border-b border-white/5">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center gap-4">

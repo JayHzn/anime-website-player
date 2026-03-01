@@ -15,6 +15,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [imgErrors, setImgErrors] = useState(new Set());
   const [resumingId, setResumingId] = useState(null);
+  const [hoveredCover, setHoveredCover] = useState(null);
   const carouselRef = useRef(null);
 
   useEffect(() => {
@@ -174,7 +175,23 @@ export default function HomePage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+    <div className="relative max-w-7xl mx-auto px-4 sm:px-6 py-8">
+      {/* Global blurred background on hover */}
+      <div
+        className={`fixed inset-0 -z-10 transition-opacity duration-700 pointer-events-none ${
+          hoveredCover ? 'opacity-20' : 'opacity-0'
+        }`}
+      >
+        {hoveredCover && (
+          <img
+            src={hoveredCover}
+            alt=""
+            className="w-full h-full object-cover"
+            style={{ filter: 'blur(60px) saturate(1.8) brightness(0.6)' }}
+          />
+        )}
+      </div>
+
       {/* Continue Watching */}
       {progress.length > 0 && (
         <section className="mb-12">
@@ -186,21 +203,11 @@ export default function HomePage() {
             {progress.map((p) => (
               <div
                 key={p.anime_id}
-                className="relative bg-bg-card rounded-xl overflow-hidden border border-white/5 hover:border-accent-primary/20 transition-all group animate-fade-up"
+                className="bg-bg-card rounded-xl overflow-hidden border border-white/5 hover:border-accent-primary/20 transition-all group animate-fade-up"
+                onMouseEnter={() => setHoveredCover(p.anime_cover)}
+                onMouseLeave={() => setHoveredCover(null)}
               >
-                {/* Blurred background on hover */}
-                {p.anime_cover && (
-                  <div
-                    className="absolute inset-0 opacity-0 group-hover:opacity-15 transition-opacity duration-700 pointer-events-none"
-                    style={{
-                      backgroundImage: `url(${p.anime_cover})`,
-                      backgroundSize: 'cover',
-                      backgroundPosition: 'center',
-                      filter: 'blur(20px) saturate(1.5)',
-                    }}
-                  />
-                )}
-                <div className="relative flex gap-4 p-4">
+                <div className="flex gap-4 p-4">
                   {/* Thumbnail */}
                   <Link
                     to={`/anime/${p.source}/${encodeURIComponent(p.anime_id)}`}
@@ -342,6 +349,8 @@ export default function HomePage() {
                   key={`latest-${anime.id}`}
                   to={href}
                   onClick={handleClick}
+                  onMouseEnter={() => setHoveredCover(anime.cover)}
+                  onMouseLeave={() => setHoveredCover(null)}
                   className="flex-shrink-0 w-44 snap-start group"
                 >
                   <div className="relative aspect-[3/4] rounded-xl overflow-hidden bg-bg-card">
@@ -412,6 +421,8 @@ export default function HomePage() {
                   <div
                     key={anime.id}
                     onClick={() => goToSeasonAnime(anime)}
+                    onMouseEnter={() => setHoveredCover(anime.cover)}
+                    onMouseLeave={() => setHoveredCover(null)}
                     className={`group block animate-fade-up animate-fade-up-delay-${(i % 4) + 1} cursor-pointer`}
                   >
                     <div className="relative aspect-[3/4] rounded-xl overflow-hidden bg-bg-card">
