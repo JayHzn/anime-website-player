@@ -201,6 +201,15 @@ export default function HomePage() {
     setProgress((p) => p.filter((x) => x.anime_id !== animeId));
   }
 
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
+        <div className="w-10 h-10 border-2 border-white/10 border-t-accent-primary rounded-full animate-spin" />
+        <p className="text-white/40 text-sm font-display">Chargement...</p>
+      </div>
+    );
+  }
+
   return (
     <div className="relative max-w-7xl mx-auto px-4 sm:px-6 py-8">
       {/* Global blurred background on hover */}
