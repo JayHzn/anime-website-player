@@ -47,7 +47,10 @@
       "Bash(powershell -Command \"Compress-Archive -Path ''extension/*'' -DestinationPath ''extension-v1.0.0.zip'' -Force\")",
       "Bash(npx eas build:list --platform android --limit 1 --non-interactive)",
       "Bash(command -v gh)",
-      "Bash(powershell -Command \"Get-Command gh -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source\")"
+      "Bash(powershell -Command \"Get-Command gh -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source\")",
+      "Bash(rm -f cover_fetcher.py cache.py)",
+      "Bash(rm -f sources/voiranime.py sources/voirdrama.py sources/base.py sources/_example_template.py sources/__init__.py)",
+      "Bash(rmdir sources)"
     ]
   }
 }

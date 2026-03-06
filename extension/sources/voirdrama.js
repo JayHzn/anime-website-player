@@ -1,3 +1,5 @@
+import { cfFetch } from "../background.js";
+
 /**
  * VoirDrama.tv source plugin
  *
@@ -93,7 +95,7 @@ export class VoirdramaSource {
             "current_page_id=0&qtranslate_lang=0&filters_changed=0&filters_initial=1&asp_gen%5B%5D=title&asp_gen%5B%5D=content&asp_gen%5B%5D=excerpt",
         });
 
-        const resp = await fetch(`${BASE}/wp-admin/admin-ajax.php`, {
+        const resp = await cfFetch(`${BASE}/wp-admin/admin-ajax.php`, {
           method: "POST",
           headers: {
             ...HEADERS,
@@ -190,7 +192,7 @@ export class VoirdramaSource {
   async _searchWpFallback(query) {
     try {
       const url = `${BASE}/?s=${encodeURIComponent(query)}&post_type=wp-manga`;
-      const resp = await fetch(url, { headers: HEADERS });
+      const resp = await cfFetch(url, { headers: HEADERS });
       if (!resp.ok) return [];
 
       const html = await resp.text();
@@ -225,7 +227,7 @@ export class VoirdramaSource {
 
   async getLatestEpisodes() {
     try {
-      const resp = await fetch(BASE + "/", { headers: HEADERS });
+      const resp = await cfFetch(BASE + "/", { headers: HEADERS });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const html = await resp.text();
 
@@ -285,7 +287,7 @@ export class VoirdramaSource {
   async getSeasonAnime() {
     try {
       // The homepage shows dramas with recent episode updates = currently airing
-      const resp = await fetch(BASE + "/", { headers: HEADERS });
+      const resp = await cfFetch(BASE + "/", { headers: HEADERS });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const html = await resp.text();
 
@@ -343,7 +345,7 @@ export class VoirdramaSource {
 
   async getEpisodes(dramaId) {
     const url = `${BASE}/drama/${dramaId}/`;
-    const resp = await fetch(url, { headers: HEADERS });
+    const resp = await cfFetch(url, { headers: HEADERS });
     if (!resp.ok)
       throw new Error(`Failed to fetch drama page: HTTP ${resp.status}`);
 
@@ -374,7 +376,7 @@ export class VoirdramaSource {
   async getAnimeInfo(dramaId) {
     try {
       const url = `${BASE}/drama/${dramaId}/`;
-      const resp = await fetch(url, { headers: HEADERS });
+      const resp = await cfFetch(url, { headers: HEADERS });
       if (!resp.ok) return null;
 
       const html = await resp.text();
@@ -429,7 +431,7 @@ export class VoirdramaSource {
 
   async getVideoUrl(episodeId) {
     const url = `${BASE}/drama/${episodeId}/`;
-    const resp = await fetch(url, { headers: HEADERS });
+    const resp = await cfFetch(url, { headers: HEADERS });
     if (!resp.ok)
       throw new Error(`Failed to fetch episode page: HTTP ${resp.status}`);
 
@@ -491,7 +493,7 @@ export class VoirdramaSource {
 
   async _resolveEmbedUrl(embedUrl) {
     try {
-      const resp = await fetch(embedUrl, {
+      const resp = await cfFetch(embedUrl, {
         headers: { ...HEADERS, Referer: BASE + "/" },
       });
       if (!resp.ok) return null;
@@ -620,7 +622,7 @@ export class VoirdramaSource {
         chapter: chMatch[1],
       });
 
-      const resp = await fetch(`${BASE}/wp-admin/admin-ajax.php`, {
+      const resp = await cfFetch(`${BASE}/wp-admin/admin-ajax.php`, {
         method: "POST",
         headers: {
           ...HEADERS,

@@ -1,24 +1,22 @@
 """
 AnimeHub - Local Anime Streaming Aggregator
 FastAPI Backend
+
+All scraping is handled client-side (browser extension or mobile app).
+The backend only provides: HLS proxy, progress tracking, skip segments.
 """
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
 import asyncio
-import importlib
-import pkgutil
 import os
 import httpx
 import base64
 
 from db.database import Database
-from sources.base import AnimeSource
-from cover_fetcher import fetch_covers_batch
-import cache
 
 # Keep references to background tasks to prevent garbage collection
 _background_tasks: set[asyncio.Task] = set()
@@ -31,9 +29,6 @@ class CacheControlMiddleware(BaseHTTPMiddleware):
     """Add Cache-Control headers for stable GET endpoints."""
 
     CACHE_RULES = {
-        "/anime/": 300,      # 5 min for anime info & episodes
-        "/search": 120,      # 2 min for search results
-        "/sources": 3600,    # 1 hour for source list
         "/progress": 0,      # never cache progress
     }
 
@@ -51,7 +46,7 @@ class CacheControlMiddleware(BaseHTTPMiddleware):
         return response
 
 
-app = FastAPI(title="AnimeHub API", version="0.1.0")
+app = FastAPI(title="AnimeHub API", version="0.2.0")
 
 app.add_middleware(CacheControlMiddleware)
 app.add_middleware(
@@ -64,28 +59,6 @@ app.add_middleware(
 
 # Database
 db = Database()
-
-# --- Source Plugin System ---
-loaded_sources: dict[str, AnimeSource] = {}
-
-
-def load_sources():
-    """Dynamically load all source plugins from the sources/ directory."""
-    sources_dir = os.path.join(os.path.dirname(__file__), "sources")
-    for _, module_name, _ in pkgutil.iter_modules([sources_dir]):
-        if module_name == "base" or module_name.startswith("_"):
-            continue
-        try:
-            module = importlib.import_module(f"sources.{module_name}")
-            if hasattr(module, "Source"):
-                source_instance = module.Source()
-                loaded_sources[source_instance.name] = source_instance
-                print(f"✓ Loaded source: {source_instance.name}")
-        except Exception as e:
-            print(f"✗ Failed to load source {module_name}: {e}")
-
-
-load_sources()
 
 
 # --- Pydantic Models ---
@@ -115,127 +88,7 @@ def root():
     if os.path.isfile(static_index):
         from fastapi.responses import FileResponse
         return FileResponse(static_index)
-    return {"status": "ok", "sources": list(loaded_sources.keys())}
-
-
-@app.get("/sources")
-def list_sources():
-    """List all available sources."""
-    return [
-        {"name": s.name, "language": s.language, "base_url": s.base_url}
-        for s in loaded_sources.values()
-    ]
-
-
-@app.get("/search")
-async def search(q: str = Query(""), source: Optional[str] = None):
-    """Search for anime across sources."""
-    cache_key = f"search:{source or 'all'}:{q}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        return cached
-
-    results = []
-    sources_to_search = (
-        [loaded_sources[source]] if source and source in loaded_sources
-        else loaded_sources.values()
-    )
-    for src in sources_to_search:
-        try:
-            src_results = await src.search(q)
-            for r in src_results:
-                r["source"] = src.name
-            results.extend(src_results)
-        except Exception as e:
-            print(f"Search error on {src.name}: {e}")
-
-    # Enrich results missing covers with Jikan API (MyAnimeList) in batch
-    missing = [r for r in results if not r.get("cover")]
-    if missing:
-        titles = [r.get("title", "") for r in missing]
-        covers = await fetch_covers_batch(titles)
-        for r in missing:
-            cover = covers.get(r.get("title", ""), "")
-            if cover:
-                r["cover"] = cover
-
-    cache.set(cache_key, results, "search")
-    return results
-
-
-@app.get("/anime/{source}/{anime_id:path}/info")
-async def get_anime_info(source: str, anime_id: str):
-    """Get anime details (title, cover, type, year)."""
-    if source not in loaded_sources:
-        raise HTTPException(404, f"Source '{source}' not found")
-
-    cache_key = f"info:{source}:{anime_id}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        return cached
-
-    try:
-        info = await loaded_sources[source].get_anime_info(anime_id)
-        if not info:
-            raise HTTPException(404, "Anime info not available")
-        info["source"] = source
-        cache.set(cache_key, info, "anime_info")
-        return info
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-
-@app.get("/anime/{source}/{anime_id:path}/episodes")
-async def get_episodes(source: str, anime_id: str):
-    """Get episode list for an anime. Auto-triggers ML training on 10 random episodes."""
-    if source not in loaded_sources:
-        raise HTTPException(404, f"Source '{source}' not found")
-
-    cache_key = f"episodes:{source}:{anime_id}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        return cached
-
-    try:
-        episodes = await loaded_sources[source].get_episodes(anime_id)
-        cache.set(cache_key, episodes, "episodes")
-
-        # Auto-trigger background analysis of 10 random episodes for training
-        try:
-            from ml.orchestrator import analyze_random_episodes
-            task = asyncio.create_task(
-                analyze_random_episodes(db, anime_id, source, episodes, loaded_sources[source])
-            )
-            _background_tasks.add(task)
-            task.add_done_callback(_background_tasks.discard)
-        except ImportError:
-            pass  # ML not available
-
-        return episodes
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-
-@app.get("/episode/{source}/{episode_id:path}/video")
-async def get_video_url(source: str, episode_id: str):
-    """Get the video URL(s) for an episode."""
-    if source not in loaded_sources:
-        raise HTTPException(404, f"Source '{source}' not found")
-    try:
-        data = await loaded_sources[source].get_video_url(episode_id)
-        # If we got a direct HLS URL, rewrite it to go through our proxy
-        if data.get("url") and data.get("type") != "iframe" and ".m3u8" in data["url"]:
-            original_url = data["url"]
-            referer = data.get("referer", "")
-            encoded = base64.urlsafe_b64encode(original_url.encode()).decode()
-            data["proxy_url"] = f"/proxy/hls/{encoded}"
-            if referer:
-                data["proxy_url"] += f"?ref={base64.urlsafe_b64encode(referer.encode()).decode()}"
-        return data
-    except Exception as e:
-        raise HTTPException(500, str(e))
+    return {"status": "ok"}
 
 
 # --- HLS Video Proxy ---
@@ -374,83 +227,14 @@ def delete_progress(anime_id: str, request: Request):
 
 @app.get("/episode/{source}/{episode_id:path}/skip-segments")
 async def get_skip_segments(source: str, episode_id: str, ep: Optional[int] = None):
-    """
-    Get OP/ED skip segment timestamps for an episode.
-    Auto-triggers background analysis if not cached.
-    Pass ?ep=N to avoid re-fetching the episode list.
-    """
-    if source not in loaded_sources:
-        raise HTTPException(404, f"Source '{source}' not found")
-
-    # Parse anime_id from episode_id (e.g. "naruto/naruto-001-vostfr" -> "naruto")
+    """Get OP/ED skip segment timestamps for an episode."""
     anime_id = episode_id.split("/")[0] if "/" in episode_id else episode_id
-
-    # Use provided episode number, or look it up from cache/scrape
     episode_number = ep or 0
-    if not episode_number:
-        # Try cache first to avoid a scrape
-        cache_key = f"episodes:{source}:{anime_id}"
-        episodes = cache.get(cache_key)
-        if not episodes:
-            try:
-                episodes = await loaded_sources[source].get_episodes(anime_id)
-                cache.set(cache_key, episodes, "episodes")
-            except Exception:
-                episodes = []
-        for e in episodes:
-            if e["id"] == episode_id:
-                episode_number = e["number"]
-                break
 
-    try:
-        from ml.orchestrator import get_skip_segments as ml_get_skip
-        result = await ml_get_skip(
-            db, anime_id, source, episode_number,
-            episode_id=episode_id,
-            source_plugin=loaded_sources[source],
-        )
-        return result
-    except ImportError:
-        # ML not available — check DB cache only
-        cached = db.get_skip_segments(anime_id, source, episode_number)
-        if cached:
-            return {**cached, "status": "ready"}
-        return {"opening": None, "ending": None, "status": "unavailable"}
-
-
-@app.post("/anime/{source}/{anime_id:path}/analyze-skip")
-async def trigger_skip_analysis(source: str, anime_id: str):
-    """Trigger background OP/ED analysis for all episodes of an anime."""
-    if source not in loaded_sources:
-        raise HTTPException(404, f"Source '{source}' not found")
-
-    try:
-        from ml.orchestrator import analyze_episode
-    except ImportError:
-        return {"status": "error", "message": "ML not available"}
-
-    async def analyze_all():
-        try:
-            episodes = await loaded_sources[source].get_episodes(anime_id)
-            print(f"[ml] Batch analysis: {len(episodes)} episodes for '{anime_id}'")
-            for ep in episodes:
-                try:
-                    cached = db.get_skip_segments(anime_id, source, ep["number"])
-                    if cached:
-                        continue
-                    await analyze_episode(
-                        db, anime_id, source, ep["number"], ep["id"], loaded_sources[source]
-                    )
-                except Exception as e:
-                    print(f"[ml] Batch: error on ep {ep['number']}: {e}")
-            print(f"[ml] Batch analysis complete for '{anime_id}'")
-        except Exception as e:
-            print(f"[ml] Batch analysis error: {e}")
-
-    task = asyncio.create_task(analyze_all())
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
-    return {"status": "analyzing", "message": "Background analysis started"}
+    cached = db.get_skip_segments(anime_id, source, episode_number)
+    if cached:
+        return {**cached, "status": "ready"}
+    return {"opening": None, "ending": None, "status": "unavailable"}
 
 
 @app.put("/anime/{source}/{anime_id:path}/skip-segments/{episode_number}")
@@ -481,49 +265,6 @@ def delete_skip_segments(source: str, anime_id: str, episode_number: int):
     return {"status": "ok"}
 
 
-@app.post("/ml/retrain")
-async def retrain_model():
-    """Force retrain the CNN model on all accumulated data."""
-    try:
-        from ml.training import train_model, load_all_training_data
-        from ml.inference import detector
-    except ImportError:
-        return {"status": "error", "message": "ML not available"}
-
-    samples = load_all_training_data()
-    if len(samples) < 20:
-        return {"status": "error", "message": f"Not enough training data ({len(samples)} samples, need 20+)"}
-
-    task = asyncio.create_task(asyncio.to_thread(train_model))
-    _background_tasks.add(task)
-    task.add_done_callback(lambda t: (detector.reload(), _background_tasks.discard(t)))
-    return {"status": "training", "message": f"Retraining on {len(samples)} samples"}
-
-
-@app.get("/ml/status")
-def ml_status():
-    """Get ML system status."""
-    try:
-        from ml.inference import detector
-        from ml.training import load_all_training_data, MODELS_DIR
-
-        model_exists = (MODELS_DIR / "skip_segment_cnn.pt").exists()
-        samples = load_all_training_data()
-        class_counts = {"opening": 0, "ending": 0, "content": 0}
-        label_names = {0: "opening", 1: "ending", 2: "content"}
-        for _, label in samples:
-            class_counts[label_names.get(label, "content")] += 1
-
-        return {
-            "model_available": detector.is_available,
-            "model_file_exists": model_exists,
-            "total_training_samples": len(samples),
-            "samples_by_class": class_counts,
-        }
-    except ImportError:
-        return {"model_available": False, "ml_installed": False}
-
-
 # --- Static Frontend (production) ---
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(STATIC_DIR):
@@ -541,7 +282,7 @@ if os.path.isdir(STATIC_DIR):
     async def spa_fallback(full_path: str):
         """SPA fallback: serve index.html for all non-API routes."""
         # Don't catch API routes
-        if full_path.startswith(("api/", "sources", "search", "episode/", "progress", "ml/")):
+        if full_path.startswith(("api/", "episode/", "progress", "ml/", "proxy/")):
             raise HTTPException(404)
         # Serve actual static files if they exist
         file_path = os.path.join(STATIC_DIR, full_path)

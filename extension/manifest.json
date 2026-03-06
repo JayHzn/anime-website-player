@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "AnimeHub Source",
-  "version": "1.1.10",
+  "version": "1.2.2",
   "description": "Fournit les sources anime et drama pour AnimeHub",
-  "permissions": [],
+  "permissions": ["tabs", "scripting"],
   "host_permissions": [
     "https://v6.voiranime.com/*",
     "https://*.vidmoly.to/*",

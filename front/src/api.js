@@ -127,22 +127,13 @@ export const api = {
 
   // Storage operations → always backend
   getSources: async () => {
-    // Try extension ping first for source list
     if (_extSources && _extSources.length > 0) {
       return _extSources.map((name) => ({ name, language: 'fr', base_url: '' }));
     }
-    // If extension detected but sources not cached, re-ping
-    if (_extReady) {
-      try {
-        const pingData = await extRequest('ping', {}, 2000);
-        _extSources = pingData?.sources || [];
-        if (_extSources.length > 0) {
-          return _extSources.map((name) => ({ name, language: 'fr', base_url: '' }));
-        }
-      } catch { /* fall through to backend */ }
-    }
     try {
-      return await fetchJSON('/sources');
+      const pingData = await extRequest('ping', {}, 2000);
+      _extSources = pingData?.sources || [];
+      return _extSources.map((name) => ({ name, language: 'fr', base_url: '' }));
     } catch {
       return [];
     }
