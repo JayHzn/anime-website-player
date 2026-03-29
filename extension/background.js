@@ -1,6 +1,16 @@
-// ── Available sources (will be populated with actual implementations) ──
+import { AnimeSamaSource } from './sources/anime-sama.js';
+
+// ── Available sources ────────────────────────────────────────
 
 export const AVAILABLE_SOURCES = ['anime-sama', 'french-anime', 'vostfree'];
+
+const sourceInstances = {
+  'anime-sama': new AnimeSamaSource(),
+};
+
+function getSource(name) {
+  return sourceInstances[name] || null;
+}
 
 // ── Source storage ───────────────────────────────────────────
 
@@ -31,7 +41,7 @@ export function setSearchCache(source, query, results) {
 
 // ── Message handler ──────────────────────────────────────────
 
-export async function handleAction(action, payload, _sender) {
+export async function handleAction(action, payload, sender) {
   if (action === 'ping') {
     const selected = await getSelectedSource();
     return {
@@ -50,12 +60,89 @@ export async function handleAction(action, payload, _sender) {
     throw new Error(`Source non configurée: ${sourceName || 'aucune'}. Sélectionnez une source dans l'extension.`);
   }
 
-  // Source implementations will be added here as they are developed
-  // For now, throw a clear error
-  throw new Error(`La source "${sourceName}" n'est pas encore implémentée.`);
+  const source = getSource(sourceName);
+  if (!source) {
+    throw new Error(`La source "${sourceName}" n'est pas encore implémentée.`);
+  }
+
+  switch (action) {
+    case 'search': {
+      const query = payload.query ?? '';
+      const cached = getCachedSearch(sourceName, query);
+      if (cached) {
+        console.log(`[ext] search cache HIT (${sourceName}:${query})`);
+        return cached;
+      }
+      const results = await source.search(query);
+      for (const r of results) r.source = sourceName;
+      setSearchCache(sourceName, query, results);
+
+      // Enrich covers in background if the source supports it
+      if (sender?.tab?.id && source.enrichCoversAsync) {
+        const tabId = sender.tab.id;
+        source.enrichCoversAsync(results, (patches) => {
+          for (const p of patches) p.source = sourceName;
+          chrome.tabs.sendMessage(tabId, {
+            type: 'ANIME_EXT_COVERS_UPDATE',
+            data: patches,
+          }).catch(() => {});
+        });
+      }
+      return results;
+    }
+    case 'getEpisodes':
+      return await source.getEpisodes(payload.animeId);
+    case 'getAnimeInfo': {
+      const info = await source.getAnimeInfo(payload.animeId);
+      if (info) info.source = sourceName;
+      return info;
+    }
+    case 'getLatestEpisodes': {
+      const latest = await source.getLatestEpisodes();
+      for (const r of latest) r.source = sourceName;
+      if (sender?.tab?.id && source.enrichCoversAsync) {
+        const tabId = sender.tab.id;
+        source.enrichCoversAsync([...latest], (patches) => {
+          for (const p of patches) p.source = sourceName;
+          chrome.tabs.sendMessage(tabId, {
+            type: 'ANIME_EXT_COVERS_UPDATE',
+            data: patches,
+          }).catch(() => {});
+        });
+      }
+      return latest;
+    }
+    case 'retryCovers': {
+      const items = payload.items || [];
+      if (items.length === 0) return [];
+      for (const r of items) r.source = r.source || sourceName;
+      if (sender?.tab?.id && source.enrichCoversAsync) {
+        const tabId = sender.tab.id;
+        source.enrichCoversAsync(items, (patches) => {
+          for (const p of patches) p.source = sourceName;
+          chrome.tabs.sendMessage(tabId, {
+            type: 'ANIME_EXT_COVERS_UPDATE',
+            data: patches,
+          }).catch(() => {});
+        });
+      }
+      return { status: 'retrying', count: items.length };
+    }
+    case 'getSeasonAnime': {
+      const season = await source.getSeasonAnime();
+      for (const r of season) r.source = sourceName;
+      return season;
+    }
+    case 'getVideoUrl':
+      return await source.getVideoUrl(payload.episodeId);
+    case 'proxyImage':
+      return await proxyImageToDataUrl(payload.url, payload.referer);
+    default:
+      throw new Error(`Action inconnue: ${action}`);
+  }
 }
 
-// ── Image proxy (kept for future sources) ────────────────────
+// ── Image proxy ──────────────────────────────────────────────
 
 export async function proxyImageToDataUrl(url, referer) {
   if (!url) return '';
@@ -88,6 +175,6 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
         sendResponse({ error: err.message });
       });
 
-    return true; // keep channel open for async sendResponse
+    return true;
   });
 }

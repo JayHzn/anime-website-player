@@ -13,6 +13,9 @@
     "https://*.voe.sx/*",
     "https://*.f16px.com/*",
     "https://*.streamtape.com/*",
+    "https://*.sendvid.com/*",
+    "https://*.sibnet.ru/*",
+    "https://raw.githubusercontent.com/*",
     "https://api.jikan.moe/*"
   ],
   "action": {
