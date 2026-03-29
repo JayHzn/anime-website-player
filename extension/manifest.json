@@ -1,19 +1,26 @@
 {
   "manifest_version": 3,
   "name": "AnimeHub Source",
-  "version": "1.2.7",
+  "version": "2.0.0",
   "description": "Fournit les sources anime et drama pour AnimeHub",
-  "permissions": ["tabs", "scripting"],
+  "permissions": ["tabs", "scripting", "storage"],
   "host_permissions": [
-    "https://v6.voiranime.com/*",
+    "https://anime-sama.to/*",
+    "https://french-anime.com/*",
+    "https://vostfree.ws/*",
     "https://*.vidmoly.to/*",
     "https://*.vidmoly.biz/*",
     "https://*.voe.sx/*",
     "https://*.f16px.com/*",
     "https://*.streamtape.com/*",
-    "https://api.jikan.moe/*",
-    "https://voirdrama.tv/*"
+    "https://api.jikan.moe/*"
   ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "48": "icons/icon48.png"
+    }
+  },
   "background": {
     "service_worker": "background.js",
     "type": "module"

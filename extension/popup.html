@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      width: 300px;
+      background: #0a0a0f;
+      color: #e8e8e8;
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 16px 16px 12px;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .logo {
+      width: 32px;
+      height: 32px;
+      background: linear-gradient(135deg, #e63946, #c1121f);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .logo svg {
+      width: 16px;
+      height: 16px;
+      fill: white;
+    }
+
+    .header-text h1 {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+
+    .header-text h1 span { color: #e63946; }
+
+    .header-text p {
+      font-size: 11px;
+      color: rgba(255,255,255,0.4);
+      margin-top: 1px;
+    }
+
+    .section-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: rgba(255,255,255,0.35);
+      padding: 12px 16px 8px;
+    }
+
+    .sources-list {
+      padding: 0 8px 8px;
+    }
+
+    .source-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid transparent;
+      border-radius: 10px;
+      background: transparent;
+      color: rgba(255,255,255,0.7);
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      text-align: left;
+      font-family: inherit;
+    }
+
+    .source-item:hover {
+      background: rgba(255,255,255,0.05);
+      color: white;
+      border-color: rgba(255,255,255,0.08);
+    }
+
+    .source-item.active {
+      background: rgba(230,57,70,0.1);
+      border-color: rgba(230,57,70,0.25);
+      color: #e63946;
+    }
+
+    .source-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .source-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .source-name {
+      font-weight: 600;
+      font-size: 13px;
+      line-height: 1.3;
+    }
+
+    .source-url {
+      font-size: 10px;
+      color: rgba(255,255,255,0.3);
+      margin-top: 1px;
+    }
+
+    .source-item.active .source-url {
+      color: rgba(230,57,70,0.5);
+    }
+
+    .radio-dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 2px solid rgba(255,255,255,0.15);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: all 0.15s ease;
+    }
+
+    .source-item.active .radio-dot {
+      border-color: #e63946;
+    }
+
+    .radio-dot-inner {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #e63946;
+      transform: scale(0);
+      transition: transform 0.15s ease;
+    }
+
+    .source-item.active .radio-dot-inner {
+      transform: scale(1);
+    }
+
+    /* Source colors */
+    .source-icon.anime-sama { background: rgba(99,102,241,0.15); color: #818cf8; }
+    .source-icon.french-anime { background: rgba(244,114,182,0.15); color: #f472b6; }
+    .source-icon.vostfree { background: rgba(52,211,153,0.15); color: #34d399; }
+
+    .footer {
+      padding: 10px 16px 14px;
+      border-top: 1px solid rgba(255,255,255,0.05);
+      text-align: center;
+    }
+
+    .footer p {
+      font-size: 10px;
+      color: rgba(255,255,255,0.25);
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      color: rgba(255,255,255,0.4);
+      padding: 6px 16px;
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+    }
+
+    .status-dot.connected { background: #34d399; }
+    .status-dot.disconnected { background: #f87171; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo">
+      <svg viewBox="0 0 24 24"><polygon points="8,5 19,12 8,19"/></svg>
+    </div>
+    <div class="header-text">
+      <h1>Anime<span>Hub</span></h1>
+      <p>Choisissez votre source</p>
+    </div>
+  </div>
+
+  <div class="section-title">Sources disponibles</div>
+
+  <div class="sources-list" id="sourcesList">
+    <button class="source-item" data-source="anime-sama">
+      <div class="source-icon anime-sama">AS</div>
+      <div class="source-info">
+        <div class="source-name">Anime-sama</div>
+        <div class="source-url">anime-sama.to</div>
+      </div>
+      <div class="radio-dot"><div class="radio-dot-inner"></div></div>
+    </button>
+
+    <button class="source-item" data-source="french-anime">
+      <div class="source-icon french-anime">FA</div>
+      <div class="source-info">
+        <div class="source-name">French-anime</div>
+        <div class="source-url">french-anime.com</div>
+      </div>
+      <div class="radio-dot"><div class="radio-dot-inner"></div></div>
+    </button>
+
+    <button class="source-item" data-source="vostfree">
+      <div class="source-icon vostfree">VF</div>
+      <div class="source-info">
+        <div class="source-name">Vostfree</div>
+        <div class="source-url">vostfree.ws</div>
+      </div>
+      <div class="radio-dot"><div class="radio-dot-inner"></div></div>
+    </button>
+  </div>
+
+  <div class="footer">
+    <p>La page se rechargera automatiquement</p>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,11 +1,216 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useOutletContext, useNavigate } from 'react-router-dom';
-import { Play, Clock, Trash2, ChevronLeft, ChevronRight, Flame, Film, Sparkles } from 'lucide-react';
+import { Play, Clock, Trash2, ChevronLeft, ChevronRight, Flame, Film, Sparkles, Puzzle, MousePointer, RefreshCw, CheckCircle, Download, Monitor, Globe, Zap } from 'lucide-react';
 import { api, onCoversUpdate } from '../api';
 
+const EXTENSION_DOWNLOAD_URL = 'https://github.com/JayHzn/anime-website-player/raw/main/extension';
+
+// ── Source list (shared between tutorial sections) ───────────
+
+function SourceList() {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/5">
+        <div className="w-8 h-8 rounded-lg bg-indigo-500/15 flex items-center justify-center text-indigo-400 font-bold text-xs">AS</div>
+        <div>
+          <span className="text-white/70 text-sm font-medium">Anime-sama</span>
+          <span className="text-white/25 text-xs ml-2">anime-sama.to</span>
+        </div>
+      </div>
+      <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/5">
+        <div className="w-8 h-8 rounded-lg bg-pink-500/15 flex items-center justify-center text-pink-400 font-bold text-xs">FA</div>
+        <div>
+          <span className="text-white/70 text-sm font-medium">French-anime</span>
+          <span className="text-white/25 text-xs ml-2">french-anime.com</span>
+        </div>
+      </div>
+      <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/5">
+        <div className="w-8 h-8 rounded-lg bg-emerald-500/15 flex items-center justify-center text-emerald-400 font-bold text-xs">VF</div>
+        <div>
+          <span className="text-white/70 text-sm font-medium">Vostfree</span>
+          <span className="text-white/25 text-xs ml-2">vostfree.ws</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Step component ───────────────────────────────────────────
+
+function Step({ number, icon: Icon, title, children, delay }) {
+  return (
+    <div className={`flex gap-5 items-start animate-fade-up animate-fade-up-delay-${delay}`}>
+      <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-accent-primary/10 border border-accent-primary/20 flex items-center justify-center">
+        <span className="text-accent-primary font-bold text-sm">{number}</span>
+      </div>
+      <div className="flex-1 bg-bg-card rounded-xl border border-white/5 p-5">
+        <div className="flex items-center gap-2 mb-2">
+          <Icon className="w-4 h-4 text-accent-primary" />
+          <h3 className="font-display font-semibold text-white text-sm">{title}</h3>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ── Welcome page (extension not detected) ────────────────────
+
+function WelcomePage() {
+  return (
+    <div className="relative max-w-3xl mx-auto px-4 sm:px-6 py-16">
+      {/* Hero */}
+      <div className="text-center mb-14 animate-fade-up">
+        <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-br from-accent-primary to-red-600 shadow-lg shadow-accent-primary/20 mb-6">
+          <Play className="w-10 h-10 text-white fill-white ml-1" />
+        </div>
+        <h1 className="font-display font-bold text-4xl text-white mb-4">
+          Anime<span className="text-accent-primary">Hub</span>
+        </h1>
+        <p className="text-white/50 text-lg max-w-lg mx-auto leading-relaxed">
+          Regardez vos animes et dramas favoris en VF et VOSTFR, le tout depuis une seule interface.
+        </p>
+      </div>
+
+      {/* Features */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-14 animate-fade-up animate-fade-up-delay-1">
+        <div className="bg-bg-card rounded-xl border border-white/5 p-5 text-center">
+          <Globe className="w-6 h-6 text-accent-primary mx-auto mb-3" />
+          <h3 className="font-display font-semibold text-sm text-white mb-1">Multi-sources</h3>
+          <p className="text-white/35 text-xs leading-relaxed">Plusieurs sources disponibles, changez en un clic</p>
+        </div>
+        <div className="bg-bg-card rounded-xl border border-white/5 p-5 text-center">
+          <Monitor className="w-6 h-6 text-accent-primary mx-auto mb-3" />
+          <h3 className="font-display font-semibold text-sm text-white mb-1">Lecteur integre</h3>
+          <p className="text-white/35 text-xs leading-relaxed">Lecteur video complet avec reprise automatique</p>
+        </div>
+        <div className="bg-bg-card rounded-xl border border-white/5 p-5 text-center">
+          <Zap className="w-6 h-6 text-accent-primary mx-auto mb-3" />
+          <h3 className="font-display font-semibold text-sm text-white mb-1">Rapide</h3>
+          <p className="text-white/35 text-xs leading-relaxed">Recherche instantanee et navigation fluide</p>
+        </div>
+      </div>
+
+      {/* Download CTA */}
+      <div className="bg-bg-card rounded-2xl border border-accent-primary/15 p-8 text-center mb-14 animate-fade-up animate-fade-up-delay-2">
+        <Puzzle className="w-10 h-10 text-accent-primary mx-auto mb-4" />
+        <h2 className="font-display font-bold text-xl text-white mb-2">Extension requise</h2>
+        <p className="text-white/40 text-sm mb-6 max-w-md mx-auto">
+          AnimeHub a besoin d'une extension navigateur pour fonctionner. Telechargez-la et installez-la en quelques etapes.
+        </p>
+        <a
+          href={EXTENSION_DOWNLOAD_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-accent-primary text-white font-semibold text-sm hover:bg-accent-glow transition-all shadow-lg shadow-accent-primary/20 hover:shadow-accent-primary/40"
+        >
+          <Download className="w-4 h-4" />
+          Telecharger l'extension
+        </a>
+      </div>
+
+      {/* Install tutorial */}
+      <div className="mb-6">
+        <h2 className="font-display font-bold text-lg text-white mb-6 flex items-center gap-2">
+          <span className="w-8 h-[2px] bg-accent-primary/50 rounded-full"></span>
+          Comment installer
+        </h2>
+      </div>
+
+      <div className="space-y-5">
+        <Step number="1" icon={Download} title="Telecharger l'extension" delay={1}>
+          <p className="text-white/40 text-sm leading-relaxed">
+            Cliquez sur le bouton ci-dessus pour acceder au dossier de l'extension sur GitHub. Telechargez le dossier <span className="text-white/70 font-medium">extension</span> complet (ou clonez le repo).
+          </p>
+        </Step>
+
+        <Step number="2" icon={Monitor} title="Ouvrir les extensions Chrome" delay={2}>
+          <p className="text-white/40 text-sm leading-relaxed">
+            Allez dans <span className="text-white/70 font-medium">chrome://extensions</span> et activez le <span className="text-white/70 font-medium">mode developpeur</span> en haut a droite.
+          </p>
+        </Step>
+
+        <Step number="3" icon={Puzzle} title="Charger l'extension" delay={3}>
+          <p className="text-white/40 text-sm leading-relaxed">
+            Cliquez sur <span className="text-white/70 font-medium">"Charger l'extension non empaquetee"</span> et selectionnez le dossier <span className="text-white/70 font-medium">extension/</span> que vous avez telecharge.
+          </p>
+        </Step>
+
+        <Step number="4" icon={RefreshCw} title="Recharger la page" delay={4}>
+          <p className="text-white/40 text-sm leading-relaxed">
+            Rechargez cette page. L'extension sera detectee automatiquement et vous pourrez choisir votre source.
+          </p>
+        </Step>
+      </div>
+
+      <div className="text-center mt-10">
+        <button
+          onClick={() => window.location.reload()}
+          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white/60 text-sm hover:bg-white/10 hover:text-white transition-all"
+        >
+          <RefreshCw className="w-3.5 h-3.5" />
+          Recharger la page
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Source tutorial (extension OK, no source selected) ────────
+
+function SourceTutorial() {
+  return (
+    <div className="relative max-w-3xl mx-auto px-4 sm:px-6 py-16">
+      {/* Header */}
+      <div className="text-center mb-12 animate-fade-up">
+        <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-accent-primary/10 border border-accent-primary/20 mb-6">
+          <CheckCircle className="w-8 h-8 text-emerald-400" />
+        </div>
+        <h1 className="font-display font-bold text-3xl text-white mb-3">
+          Extension detectee !
+        </h1>
+        <p className="text-white/50 text-base max-w-md mx-auto">
+          Il ne reste plus qu'a choisir une source pour commencer.
+        </p>
+      </div>
+
+      {/* Steps */}
+      <div className="space-y-6">
+        <Step number="1" icon={MousePointer} title="Ouvrir l'extension" delay={1}>
+          <p className="text-white/40 text-sm leading-relaxed">
+            Cliquez sur l'icone <span className="text-white/70 font-medium">AnimeHub</span> dans la barre d'extensions de votre navigateur (en haut a droite).
+          </p>
+        </Step>
+
+        <Step number="2" icon={CheckCircle} title="Choisir une source" delay={2}>
+          <p className="text-white/40 text-sm leading-relaxed mb-3">
+            Selectionnez la source que vous souhaitez utiliser :
+          </p>
+          <SourceList />
+        </Step>
+
+        <Step number="3" icon={RefreshCw} title="C'est tout !" delay={3}>
+          <p className="text-white/40 text-sm leading-relaxed">
+            La page se rechargera automatiquement et vous pourrez parcourir le catalogue de la source choisie. Pour changer de source, rouvrez simplement l'extension.
+          </p>
+        </Step>
+      </div>
+
+      {/* Footer hint */}
+      <div className="text-center mt-10 animate-fade-up animate-fade-up-delay-4">
+        <p className="text-white/20 text-xs">
+          Vous pouvez changer de source a tout moment via l'extension
+        </p>
+      </div>
+    </div>
+  );
+}
+
+
+// ── Main HomePage ────────────────────────────────────────────
 
 export default function HomePage() {
-  const { selectedSource } = useOutletContext();
+  const { selectedSource, extMissing } = useOutletContext();
   const navigate = useNavigate();
   const [progress, setProgress] = useState([]);
   const [searchResults, setSearchResults] = useState([]);
@@ -19,7 +224,7 @@ export default function HomePage() {
   const carouselRef = useRef(null);
 
   useEffect(() => {
-    loadData();
+    if (selectedSource) loadData();
   }, [selectedSource]);
 
   // Listen for cover updates — merge into both catalogue AND carousel
@@ -73,75 +278,22 @@ export default function HomePage() {
     return () => clearInterval(timer);
   }, [searchResults, latestEpisodes, selectedSource]);
 
-  // Season cache helpers (localStorage, TTL = 30 days, per-source)
-  const SEASON_CACHE_TTL = 30 * 24 * 60 * 60 * 1000; // 30 days
-
-  function getSeasonCacheKey() {
-    return `seasonCache_${selectedSource || 'voiranime'}`;
-  }
-
-  function getCachedSeason() {
-    try {
-      const raw = localStorage.getItem(getSeasonCacheKey());
-      if (!raw) return null;
-      const { data, ts } = JSON.parse(raw);
-      if (Date.now() - ts > SEASON_CACHE_TTL) {
-        localStorage.removeItem(getSeasonCacheKey());
-        return null;
-      }
-      return data;
-    } catch {
-      return null;
-    }
-  }
-
-  function setCachedSeason(data) {
-    try {
-      localStorage.setItem(getSeasonCacheKey(), JSON.stringify({ data, ts: Date.now() }));
-    } catch { /* quota exceeded, ignore */ }
-  }
-
   async function loadData() {
     setLoading(true);
     try {
-      // Check season cache first
-      const cached = getCachedSeason();
-      if (cached && cached.length > 0) {
-        setSeasonAnime(cached);
-        setLoadingSeason(false);
-      } else {
-        setLoadingSeason(true);
-        setSeasonAnime([]);
-      }
-
-      const isAnimeSource = !selectedSource || selectedSource === 'voiranime';
-      const isDramaSource = selectedSource === 'voirdrama';
       const [prog, results, latest, season] = await Promise.all([
         api.getProgress(),
         api.search('', selectedSource),
         api.getLatestEpisodes(selectedSource).catch(() => []),
-        !cached ? api.getSeasonAnime(selectedSource).catch(() => []) : Promise.resolve([]),
+        api.getSeasonAnime(selectedSource).catch(() => []),
       ]);
-      // Set season data BEFORE revealing UI so both sections appear together
-      if (!cached && isDramaSource && season.length > 0) {
-        setSeasonAnime(season);
-        setLoadingSeason(false);
-        setCachedSeason(season);
-      } else if (!cached && !isAnimeSource) {
-        setLoadingSeason(false);
-      }
 
       setProgress(prog);
       setSearchResults(results);
       setLatestEpisodes(latest);
+      setSeasonAnime(season);
       setLoading(false);
-
-      // Anime season resolve is async (batch searches) — start after initial render
-      if (!cached && isAnimeSource && season.length > 0) {
-        resolveSeasonAnime(season);
-      } else if (!cached && isAnimeSource && season.length === 0) {
-        setLoadingSeason(false);
-      }
+      setLoadingSeason(false);
     } catch (e) {
       console.error(e);
       setLoading(false);
@@ -149,56 +301,19 @@ export default function HomePage() {
     }
   }
 
-  async function resolveSeasonAnime(season) {
-    const src = selectedSource || 'voiranime';
-    // Resolve all anime titles against voiranime in parallel (batches of 5)
-    const BATCH = 5;
-    for (let i = 0; i < season.length; i += BATCH) {
-      const batch = season.slice(i, i + BATCH);
-      const results = await Promise.allSettled(
-        batch.map(async (anime) => {
-          // Try Japanese title first, then English title as fallback
-          let res = await api.search(anime.title, src);
-          if (res.length === 0 && anime.titleEnglish && anime.titleEnglish !== anime.title) {
-            res = await api.search(anime.titleEnglish, src);
-          }
-          if (res.length > 0) {
-            // Prefer VOSTFR version (no -vf suffix) over VF
-            const vostfr = res.find((r) => !r.id.endsWith('-vf'));
-            const pick = vostfr || res[0];
-            return { ...anime, voiranimeId: pick.id, voiranimeSource: pick.source };
-          }
-          return null;
-        })
-      );
-      const found = results
-        .filter((r) => r.status === 'fulfilled' && r.value)
-        .map((r) => r.value);
-      if (found.length > 0) {
-        setSeasonAnime((prev) => {
-          const existingIds = new Set(prev.map((a) => a.id));
-          const newOnes = found.filter((a) => !existingIds.has(a.id));
-          return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
-        });
-      }
-    }
-    setLoadingSeason(false);
-    // Persist to cache
-    setSeasonAnime((final) => { setCachedSeason(final); return final; });
-  }
-
-  function goToSeasonAnime(anime) {
-    const state = anime.cover ? { cover: anime.cover } : undefined;
-    if (anime.voiranimeId) {
-      navigate(`/anime/${anime.voiranimeSource}/${encodeURIComponent(anime.voiranimeId)}`, { state });
-    } else if (anime.source && anime.source !== 'jikan') {
-      navigate(`/anime/${anime.source}/${encodeURIComponent(anime.id)}`, { state });
-    }
-  }
-
   async function removeProgress(animeId) {
     await api.deleteProgress(animeId);
     setProgress((p) => p.filter((x) => x.anime_id !== animeId));
+  }
+
+  // Extension not installed → welcome page with download + install tutorial
+  if (extMissing) {
+    return <WelcomePage />;
+  }
+
+  // Extension OK but no source selected → source selection tutorial
+  if (!selectedSource) {
+    return <SourceTutorial />;
   }
 
   if (loading) {
@@ -336,9 +451,7 @@ export default function HomePage() {
           <div className="flex items-center justify-between mb-5">
             <div className="flex items-center gap-2">
               <Flame className="w-5 h-5 text-orange-400" />
-              <h2 className="font-display font-bold text-xl text-white">
-                {selectedSource === 'voirdrama' ? 'Derniers dramas' : 'Dernières sorties'}
-              </h2>
+              <h2 className="font-display font-bold text-xl text-white">Dernières sorties</h2>
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -362,7 +475,6 @@ export default function HomePage() {
           >
             {latestEpisodes.map((anime) => {
               const hasCover = Boolean(anime.cover?.trim()) && !imgErrors.has(anime.id);
-              // If latest episode is available, go directly to watch it; otherwise go to anime page
               const href = anime.latestEpisodeId
                 ? `/watch/${anime.source}/${anime.latestEpisodeId}`
                 : `/anime/${anime.source}/${encodeURIComponent(anime.id)}`;
@@ -370,7 +482,6 @@ export default function HomePage() {
               const handleClick = (e) => {
                 if (anime.latestEpisodeId) {
                   e.preventDefault();
-                  // Store anime context with episode number for WatchPage
                   sessionStorage.setItem('currentAnime', JSON.stringify({
                     animeId: anime.id,
                     title: anime.title,
@@ -392,7 +503,6 @@ export default function HomePage() {
                   className="flex-shrink-0 w-44 snap-start group"
                 >
                   <div className="relative aspect-[3/4] rounded-xl overflow-hidden bg-bg-card">
-                    {/* Cover image */}
                     {hasCover && (
                       <img
                         src={anime.cover}
@@ -404,8 +514,6 @@ export default function HomePage() {
                         onError={() => setImgErrors((prev) => new Set(prev).add(anime.id))}
                       />
                     )}
-
-                    {/* Placeholder (no cover, error, or loading) */}
                     {!hasCover && (
                       <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-white/10 to-white/5">
                         <span className="text-3xl font-bold text-white/30 select-none">
@@ -414,20 +522,16 @@ export default function HomePage() {
                         <Film className="absolute bottom-2 right-2 w-5 h-5 text-white/20" />
                       </div>
                     )}
-
-                    {/* Episode badge */}
                     {anime.latestEpisode && (
                       <div className="absolute bottom-2 left-2 bg-accent-primary/90 backdrop-blur-sm text-white text-[11px] font-bold px-2 py-0.5 rounded-md">
                         Ep. {anime.latestEpisode}
                       </div>
                     )}
-                    {/* Rating badge */}
                     {anime.rating && (
                       <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm text-yellow-400 text-[10px] font-semibold px-1.5 py-0.5 rounded-md">
                         ★ {anime.rating}
                       </div>
                     )}
-                    {/* Hover overlay */}
                     <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
                       <div className="w-10 h-10 rounded-full bg-accent-primary/90 flex items-center justify-center shadow-lg">
                         <Play className="w-5 h-5 text-white fill-white ml-0.5" />
@@ -444,91 +548,76 @@ export default function HomePage() {
         </section>
       )}
 
-      {/* Season / Catalogue */}
+      {/* Catalogue */}
       <section>
         <div className="flex items-center gap-2 mb-5">
           <Sparkles className="w-5 h-5 text-purple-400" />
-          <h2 className="font-display font-bold text-xl text-white">
-            {selectedSource === 'voirdrama' ? 'Catalogue de dramas' : 'Animes de la saison'}
-          </h2>
+          <h2 className="font-display font-bold text-xl text-white">Catalogue</h2>
         </div>
         {seasonAnime.length > 0 ? (
-          <>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-5">
-              {seasonAnime.map((anime, i) => {
-                const hasCover = Boolean(anime.cover?.trim()) && !imgErrors.has(anime.id);
-                return (
-                  <div
-                    key={anime.id}
-                    onClick={() => goToSeasonAnime(anime)}
-                    onMouseEnter={() => setHoveredCover(anime.cover)}
-                    onMouseLeave={() => setHoveredCover(null)}
-                    className={`group block animate-fade-up animate-fade-up-delay-${(i % 4) + 1} cursor-pointer`}
-                  >
-                    <div className="relative aspect-[3/4] rounded-xl overflow-hidden bg-bg-card">
-                      {hasCover && (
-                        <img
-                          src={anime.cover}
-                          alt={anime.title}
-                          className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
-                          loading="lazy"
-                          decoding="async"
-                          referrerPolicy="no-referrer"
-                          onError={() => setImgErrors((prev) => new Set(prev).add(anime.id))}
-                        />
-                      )}
-                      {!hasCover && (
-                        <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-white/10 to-white/5">
-                          <span className="text-3xl font-bold text-white/30 select-none">
-                            {anime.title?.split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?'}
-                          </span>
-                          <Film className="absolute bottom-2 right-2 w-5 h-5 text-white/20" />
-                        </div>
-                      )}
-                      {/* Score badge */}
-                      {anime.score && (
-                        <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm text-yellow-400 text-[10px] font-semibold px-1.5 py-0.5 rounded-md">
-                          ★ {anime.score}
-                        </div>
-                      )}
-                      {/* Episodes badge */}
-                      {(anime.airedEpisodes || anime.episodes) && (
-                        <div className="absolute bottom-2 left-2 bg-black/60 backdrop-blur-sm text-white/80 text-[10px] font-semibold px-1.5 py-0.5 rounded-md">
-                          {anime.airedEpisodes ? `${anime.airedEpisodes}` : ''}{anime.airedEpisodes && anime.episodes ? ' / ' : ''}{anime.episodes ? `${anime.episodes}` : ''} ep.
-                        </div>
-                      )}
-                      {/* Hover overlay */}
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
-                        <div className="w-10 h-10 rounded-full bg-accent-primary/90 flex items-center justify-center shadow-lg">
-                          <Play className="w-5 h-5 text-white fill-white ml-0.5" />
-                        </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-5">
+            {seasonAnime.map((anime, i) => {
+              const hasCover = Boolean(anime.cover?.trim()) && !imgErrors.has(anime.id);
+              return (
+                <Link
+                  key={anime.id}
+                  to={`/anime/${anime.source || selectedSource}/${encodeURIComponent(anime.id)}`}
+                  onMouseEnter={() => setHoveredCover(anime.cover)}
+                  onMouseLeave={() => setHoveredCover(null)}
+                  className={`group block animate-fade-up animate-fade-up-delay-${(i % 4) + 1}`}
+                >
+                  <div className="relative aspect-[3/4] rounded-xl overflow-hidden bg-bg-card">
+                    {hasCover && (
+                      <img
+                        src={anime.cover}
+                        alt={anime.title}
+                        className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
+                        loading="lazy"
+                        decoding="async"
+                        referrerPolicy="no-referrer"
+                        onError={() => setImgErrors((prev) => new Set(prev).add(anime.id))}
+                      />
+                    )}
+                    {!hasCover && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-white/10 to-white/5">
+                        <span className="text-3xl font-bold text-white/30 select-none">
+                          {anime.title?.split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?'}
+                        </span>
+                        <Film className="absolute bottom-2 right-2 w-5 h-5 text-white/20" />
+                      </div>
+                    )}
+                    {anime.score && (
+                      <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm text-yellow-400 text-[10px] font-semibold px-1.5 py-0.5 rounded-md">
+                        ★ {anime.score}
+                      </div>
+                    )}
+                    {(anime.airedEpisodes || anime.episodes) && (
+                      <div className="absolute bottom-2 left-2 bg-black/60 backdrop-blur-sm text-white/80 text-[10px] font-semibold px-1.5 py-0.5 rounded-md">
+                        {anime.airedEpisodes ? `${anime.airedEpisodes}` : ''}{anime.airedEpisodes && anime.episodes ? ' / ' : ''}{anime.episodes ? `${anime.episodes}` : ''} ep.
+                      </div>
+                    )}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+                      <div className="w-10 h-10 rounded-full bg-accent-primary/90 flex items-center justify-center shadow-lg">
+                        <Play className="w-5 h-5 text-white fill-white ml-0.5" />
                       </div>
                     </div>
-                    <div className="mt-2.5 px-0.5">
-                      <h3 className="font-display font-semibold text-sm text-white/90 leading-tight line-clamp-2 group-hover:text-accent-primary transition-colors">
-                        {anime.title}
-                      </h3>
-                    </div>
                   </div>
-                );
-              })}
-            </div>
-            {loadingSeason && (
-              <div className="flex items-center justify-center py-6">
-                <div className="w-6 h-6 border-2 border-white/10 border-t-purple-400 rounded-full animate-spin" />
-                <span className="ml-3 text-white/30 text-sm">Recherche en cours...</span>
-              </div>
-            )}
-          </>
+                  <div className="mt-2.5 px-0.5">
+                    <h3 className="font-display font-semibold text-sm text-white/90 leading-tight line-clamp-2 group-hover:text-accent-primary transition-colors">
+                      {anime.title}
+                    </h3>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
         ) : loadingSeason ? (
           <div className="flex items-center justify-center py-20">
             <div className="w-8 h-8 border-2 border-white/10 border-t-purple-400 rounded-full animate-spin" />
           </div>
         ) : (
           <div className="text-center py-20 text-white/30">
-            <p className="font-display text-lg">
-              {selectedSource === 'voirdrama' ? 'Aucun drama trouvé' : 'Aucun anime de saison trouvé'}
-            </p>
+            <p className="font-display text-lg">Aucun contenu trouvé</p>
           </div>
         )}
       </section>

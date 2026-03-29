@@ -3,7 +3,8 @@ const BASE = import.meta.env.DEV ? '/api' : '';
 // ── Extension bridge ────────────────────────────────────────
 
 let _extReady = null; // null = unknown, true/false = detected
-let _extSources = null; // source names from extension ping
+let _extSources = null; // available source names from extension
+let _selectedSource = null; // currently selected source in extension
 
 /**
  * Send a request to the Chrome extension via postMessage.
@@ -39,6 +40,7 @@ function extRequest(action, payload = {}, timeoutMs = 15000) {
 
 /**
  * Detect extension availability via ping (cached).
+ * Also retrieves available sources and currently selected source.
  */
 export async function isExtensionAvailable() {
   if (_extReady !== null) return _extReady;
@@ -46,12 +48,23 @@ export async function isExtensionAvailable() {
     const pingData = await extRequest('ping', {}, 2000);
     _extReady = true;
     _extSources = pingData?.sources || [];
-    console.log('%c[EXT] Extension détectée', 'color:#4ade80;font-weight:bold', _extSources);
+    _selectedSource = pingData?.selectedSource || null;
+    console.log('%c[EXT] Extension détectée', 'color:#4ade80;font-weight:bold', { sources: _extSources, selected: _selectedSource });
   } catch {
     _extReady = false;
     console.log('%c[EXT] Extension non détectée', 'color:#fbbf24');
   }
   return _extReady;
+}
+
+/** Get the currently selected source from the extension. */
+export function getSelectedSource() {
+  return _selectedSource;
+}
+
+/** Get the list of available sources. */
+export function getAvailableSources() {
+  return _extSources || [];
 }
 
 // Reset detection when extension announces itself
@@ -103,9 +116,9 @@ async function fetchJSON(path) {
 // ── Public API ──────────────────────────────────────────────
 
 export const api = {
-  // Scraping operations → extension ONLY (no backend fallback)
+  // Scraping operations → extension ONLY
   search: (query, source) =>
-    extRequest('search', { query, source: source || 'voiranime' }),
+    extRequest('search', { query, source }),
 
   getAnimeInfo: (source, animeId) =>
     extRequest('getAnimeInfo', { animeId, source }),
@@ -117,13 +130,13 @@ export const api = {
     extRequest('getVideoUrl', { episodeId, source }),
 
   getLatestEpisodes: (source) =>
-    extRequest('getLatestEpisodes', { source: source || 'voiranime' }),
+    extRequest('getLatestEpisodes', { source }),
 
   getSeasonAnime: (source) =>
-    extRequest('getSeasonAnime', { source: source || 'voiranime' }),
+    extRequest('getSeasonAnime', { source }),
 
   retryCovers: (items, source) =>
-    extRequest('retryCovers', { items, source: source || 'voiranime' }),
+    extRequest('retryCovers', { items, source }),
 
   // Storage operations → always backend
   getSources: async () => {
@@ -133,6 +146,7 @@ export const api = {
     try {
       const pingData = await extRequest('ping', {}, 2000);
       _extSources = pingData?.sources || [];
+      _selectedSource = pingData?.selectedSource || null;
       return _extSources.map((name) => ({ name, language: 'fr', base_url: '' }));
     } catch {
       return [];
