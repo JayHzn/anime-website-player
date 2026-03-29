@@ -1,4 +1,5 @@
 import { AnimeSamaSource } from './sources/anime-sama.js';
+import { FrenchAnimeSource } from './sources/french-anime.js';
 
 // ── Available sources ────────────────────────────────────────
 
@@ -6,6 +7,7 @@ export const AVAILABLE_SOURCES = ['anime-sama', 'french-anime', 'vostfree'];
 
 const sourceInstances = {
   'anime-sama': new AnimeSamaSource(),
+  'french-anime': new FrenchAnimeSource(),
 };
 
 function getSource(name) {
@@ -39,32 +41,39 @@ export function setSearchCache(source, query, results) {
   searchCache.set(`${source}:${query}`, { results: [...results], at: Date.now() });
 }
 
-// ── Message handler ──────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────
 
-export async function handleAction(action, payload, sender) {
-  if (action === 'ping') {
-    const selected = await getSelectedSource();
-    return {
-      version: '2.0.0',
-      sources: AVAILABLE_SOURCES,
-      selectedSource: selected,
-    };
-  }
+function tagSource(items, sourceName) {
+  for (const r of items) r.source = sourceName;
+}
 
-  if (action === 'getSelectedSource') {
-    return { selectedSource: await getSelectedSource() };
-  }
+function enrichCovers(source, sourceName, items, sender) {
+  if (!sender?.tab?.id || !source.enrichCoversAsync) return;
+  const tabId = sender.tab.id;
+  source.enrichCoversAsync(items, (patches) => {
+    tagSource(patches, sourceName);
+    chrome.tabs.sendMessage(tabId, {
+      type: 'ANIME_EXT_COVERS_UPDATE',
+      data: patches,
+    }).catch(() => {});
+  });
+}
 
+function resolveSource(payload) {
   const sourceName = payload?.source;
   if (!sourceName || !AVAILABLE_SOURCES.includes(sourceName)) {
     throw new Error(`Source non configurée: ${sourceName || 'aucune'}. Sélectionnez une source dans l'extension.`);
   }
-
   const source = getSource(sourceName);
   if (!source) {
     throw new Error(`La source "${sourceName}" n'est pas encore implémentée.`);
   }
+  return { sourceName, source };
+}
 
+// ── Source action dispatch ───────────────────────────────────
+
+async function handleSourceAction(action, payload, sender, sourceName, source) {
   switch (action) {
     case 'search': {
       const query = payload.query ?? '';
@@ -74,20 +83,9 @@ export async function handleAction(action, payload, sender) {
         return cached;
       }
       const results = await source.search(query);
-      for (const r of results) r.source = sourceName;
+      tagSource(results, sourceName);
       setSearchCache(sourceName, query, results);
-
-      // Enrich covers in background if the source supports it
-      if (sender?.tab?.id && source.enrichCoversAsync) {
-        const tabId = sender.tab.id;
-        source.enrichCoversAsync(results, (patches) => {
-          for (const p of patches) p.source = sourceName;
-          chrome.tabs.sendMessage(tabId, {
-            type: 'ANIME_EXT_COVERS_UPDATE',
-            data: patches,
-          }).catch(() => {});
-        });
-      }
+      enrichCovers(source, sourceName, results, sender);
       return results;
     }
     case 'getEpisodes':
@@ -99,38 +97,20 @@ export async function handleAction(action, payload, sender) {
     }
     case 'getLatestEpisodes': {
       const latest = await source.getLatestEpisodes();
-      for (const r of latest) r.source = sourceName;
-      if (sender?.tab?.id && source.enrichCoversAsync) {
-        const tabId = sender.tab.id;
-        source.enrichCoversAsync([...latest], (patches) => {
-          for (const p of patches) p.source = sourceName;
-          chrome.tabs.sendMessage(tabId, {
-            type: 'ANIME_EXT_COVERS_UPDATE',
-            data: patches,
-          }).catch(() => {});
-        });
-      }
+      tagSource(latest, sourceName);
+      enrichCovers(source, sourceName, [...latest], sender);
       return latest;
     }
     case 'retryCovers': {
       const items = payload.items || [];
       if (items.length === 0) return [];
       for (const r of items) r.source = r.source || sourceName;
-      if (sender?.tab?.id && source.enrichCoversAsync) {
-        const tabId = sender.tab.id;
-        source.enrichCoversAsync(items, (patches) => {
-          for (const p of patches) p.source = sourceName;
-          chrome.tabs.sendMessage(tabId, {
-            type: 'ANIME_EXT_COVERS_UPDATE',
-            data: patches,
-          }).catch(() => {});
-        });
-      }
+      enrichCovers(source, sourceName, items, sender);
       return { status: 'retrying', count: items.length };
     }
     case 'getSeasonAnime': {
       const season = await source.getSeasonAnime();
-      for (const r of season) r.source = sourceName;
+      tagSource(season, sourceName);
       return season;
     }
     case 'getVideoUrl':
@@ -140,6 +120,23 @@ export async function handleAction(action, payload, sender) {
     default:
       throw new Error(`Action inconnue: ${action}`);
   }
+}
+
+// ── Message handler ──────────────────────────────────────────
+
+export async function handleAction(action, payload, sender) {
+  if (action === 'ping') {
+    return {
+      version: '2.0.0',
+      sources: AVAILABLE_SOURCES,
+      selectedSource: await getSelectedSource(),
+    };
+  }
+  if (action === 'getSelectedSource') {
+    return { selectedSource: await getSelectedSource() };
+  }
+  const { sourceName, source } = resolveSource(payload);
+  return handleSourceAction(action, payload, sender, sourceName, source);
 }
 
 // ── Image proxy ──────────────────────────────────────────────

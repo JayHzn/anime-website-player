@@ -7,6 +7,11 @@ const COVER_BASE = 'https://raw.githubusercontent.com/Anime-Sama/IMG/img/contenu
 
 // ── Helpers ──────────────────────────────────────────────────
 
+function forceHttps(url) {
+  if (!url) return url;
+  return url.replace(/^http:\/\//i, 'https://');
+}
+
 function matchAll(html, regex) {
   const results = [];
   let m;

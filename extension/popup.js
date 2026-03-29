@@ -34,19 +34,22 @@ async function init() {
     await setSelectedSource(newSource);
     render(newSource);
 
-    // Reload all AnimeHub tabs so the frontend picks up the new source
+    // Navigate all AnimeHub tabs to homepage and reload (reset)
+    const origins = [
+      'https://anime-website-player.onrender.com',
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'http://localhost:5173',
+      'http://localhost:8080',
+      'http://localhost:8000',
+    ];
     const tabs = await chrome.tabs.query({
-      url: [
-        'https://anime-website-player.onrender.com/*',
-        'http://localhost:3000/*',
-        'http://localhost:3001/*',
-        'http://localhost:5173/*',
-        'http://localhost:8080/*',
-        'http://localhost:8000/*',
-      ],
+      url: origins.map((o) => `${o}/*`),
     });
     for (const tab of tabs) {
-      chrome.tabs.reload(tab.id);
+      const origin = origins.find((o) => tab.url?.startsWith(o));
+      // Navigate to homepage root, which forces a full reset
+      await chrome.tabs.update(tab.id, { url: `${origin}/` });
     }
   });
 }

@@ -69,8 +69,8 @@ describe('handleAction - source validation', () => {
   });
 
   it('throws "not implemented" for unimplemented sources', async () => {
-    // anime-sama is implemented, so only test sources that are not yet
-    const unimplemented = AVAILABLE_SOURCES.filter((s) => s !== 'anime-sama');
+    const implemented = new Set(['anime-sama', 'french-anime']);
+    const unimplemented = AVAILABLE_SOURCES.filter((s) => !implemented.has(s));
     for (const source of unimplemented) {
       await expect(
         handleAction('search', { source }, {})
