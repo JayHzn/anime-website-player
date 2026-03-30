@@ -1,7 +1,7 @@
 import { Outlet, Link, useNavigate } from 'react-router-dom';
 import { Search, Play, Home, Clock, X, Puzzle } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { isExtensionAvailable, getSelectedSource } from '../api';
+import { isExtensionAvailable, getSelectedSource, resetExtensionCache } from '../api';
 
 export default function Layout() {
   const [query, setQuery] = useState('');
@@ -11,13 +11,25 @@ export default function Layout() {
   const [extMissing, setExtMissing] = useState(false);
   const [bannerDismissed, setBannerDismissed] = useState(false);
 
-  useEffect(() => {
+  function checkExtension() {
     isExtensionAvailable().then((ok) => {
       setExtMissing(!ok);
-      if (ok) {
-        setSelectedSource(getSelectedSource());
-      }
+      if (ok) setSelectedSource(getSelectedSource());
     });
+  }
+
+  useEffect(() => {
+    checkExtension();
+
+    // Re-check when the content script announces the extension is ready
+    // (handles race where ping times out before content script injects)
+    function onExtReady(e) {
+      if (e.data?.type !== 'ANIME_EXT_READY') return;
+      resetExtensionCache();
+      checkExtension();
+    }
+    window.addEventListener('message', onExtReady);
+    return () => window.removeEventListener('message', onExtReady);
   }, []);
 
   const handleSearch = (e) => {

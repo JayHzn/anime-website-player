@@ -19,11 +19,6 @@ function matchAll(html, regex) {
   return results;
 }
 
-function getAttr(tag, attr) {
-  const re = new RegExp(`${attr}\\s*=\\s*["']([^"']*)["']`);
-  const m = tag.match(re);
-  return m ? m[1] : '';
-}
 
 function stripTags(html) {
   return html.replace(/<[^>]*>/g, '').trim();
@@ -316,7 +311,7 @@ export class AnimeSamaSource {
       }
 
       if (urls.length >= epNum) {
-        const url = urls[epNum - 1];
+        const url = forceHttps(urls[epNum - 1]);
         const hostName = this._getHostName(url);
         sources.push({ name: `${hostName} (${varName})`, url });
       }
@@ -335,7 +330,7 @@ export class AnimeSamaSource {
     const resolved = await this._resolveVideoUrl(best.url);
 
     return {
-      url: resolved.url || best.url,
+      url: forceHttps(resolved.url || best.url),
       referer: best.url,
       headers: { Referer: best.url },
       subtitles: [],
@@ -383,18 +378,18 @@ export class AnimeSamaSource {
 
       // Vidmoly: look for m3u8
       const m3u8M = html.match(/(?:file|src)\s*[:=]\s*["'](https?:\/\/[^"']*\.m3u8[^"']*)["']/i);
-      if (m3u8M) return { url: m3u8M[1] };
+      if (m3u8M) return { url: forceHttps(m3u8M[1]) };
 
       // Voe: look for mp4/m3u8 in script
       const voeM = html.match(/(?:source|video_link)\s*[:=]\s*["'](https?:\/\/[^"']*(?:\.mp4|\.m3u8)[^"']*)["']/i);
-      if (voeM) return { url: voeM[1] };
+      if (voeM) return { url: forceHttps(voeM[1]) };
 
       // Generic: look for any direct video URL
       const genericM = html.match(/["'](https?:\/\/[^"']*\.(?:mp4|m3u8|webm)[^"']*)["']/i);
-      if (genericM) return { url: genericM[1] };
+      if (genericM) return { url: forceHttps(genericM[1]) };
 
-      // If no direct URL found, return the embed URL (player will use iframe)
-      return { url: embedUrl };
+      // If no direct URL found, return the embed URL forced to HTTPS (player will use iframe)
+      return { url: forceHttps(embedUrl) };
     } catch {
       return { url: embedUrl };
     }

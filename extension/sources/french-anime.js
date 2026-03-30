@@ -5,6 +5,11 @@ const BASE = 'https://french-anime.com';
 
 // ── Helpers ──────────────────────────────────────────────────
 
+function forceHttps(url) {
+  if (!url) return url;
+  return url.replace(/^http:\/\//i, 'https://');
+}
+
 function matchAll(html, regex) {
   const results = [];
   let m;
@@ -101,11 +106,11 @@ export class FrenchAnimeSource {
     const results = [];
     const seen = new Set();
 
-    // Match each <div class="mov clearfix"> block
-    const cardRe = /<div class="mov clearfix">([\s\S]*?)<\/div>\s*<\/div>\s*<\/div>/gi;
-
-    for (const m of matchAll(html, cardRe)) {
-      const card = this._parseMovCard(m[0]);
+    // Split on card opening tags — avoids broken nested-div regex
+    const parts = html.split('<div class="mov clearfix">');
+    for (let i = 1; i < parts.length; i++) {
+      const chunk = '<div class="mov clearfix">' + parts[i];
+      const card = this._parseMovCard(chunk);
       if (card && !seen.has(card.id)) {
         seen.add(card.id);
         results.push(card);
@@ -249,7 +254,7 @@ export class FrenchAnimeSource {
 
     const sources = urls.map((url) => ({
       name: this._getHostName(url),
-      url,
+      url: forceHttps(url),
     }));
 
     // Sort by host priority
@@ -259,7 +264,7 @@ export class FrenchAnimeSource {
     const resolved = await this._resolveVideoUrl(best.url);
 
     return {
-      url: resolved.url || best.url,
+      url: forceHttps(resolved.url || best.url),
       referer: `${BASE}/${animeId}.html`,
       headers: { Referer: `${BASE}/${animeId}.html` },
       subtitles: [],
@@ -274,7 +279,7 @@ export class FrenchAnimeSource {
       const host = new URL(url).hostname;
       if (host.includes('vidmoly')) return 'Vidmoly';
       if (host.includes('voe') || host.includes('dianaavoidthey') || host.includes('delivery-node')) return 'Voe';
-      if (host.includes('luluvid')) return 'Luluvid';
+      if (host.includes('luluvid') || host.includes('lulustream')) return 'LuluStream';
       if (host.includes('savefiles')) return 'SaveFiles';
       if (host.includes('up4fun')) return 'Up4Fun';
       if (host.includes('sendvid')) return 'SendVid';
@@ -287,11 +292,16 @@ export class FrenchAnimeSource {
   }
 
   _hostPriority(url) {
-    if (url.includes('vidmoly')) return 0;
-    if (url.includes('voe') || url.includes('dianaavoidthey')) return 1;
-    if (url.includes('luluvid')) return 2;
-    if (url.includes('sendvid')) return 3;
-    if (url.includes('sibnet')) return 4;
+    // luluvid/lulustream: direct m3u8 in JWPlayer setup, no JS challenge
+    if (url.includes('luluvid') || url.includes('lulustream')) return 0;
+    // sendvid/sibnet: direct video fallback
+    if (url.includes('sendvid')) return 1;
+    if (url.includes('sibnet')) return 2;
+    // vidmoly: redirects to .biz which has CF Turnstile → fetch blocked
+    if (url.includes('vidmoly')) return 3;
+    // voe variants: obfuscated JS, no static URL
+    if (url.includes('voe') || url.includes('dianaavoidthey')) return 4;
+    // savefiles: form POST + files expire quickly
     if (url.includes('savefiles')) return 5;
     if (url.includes('up4fun')) return 6;
     if (url.includes('streamtape')) return 7;
@@ -311,19 +321,19 @@ export class FrenchAnimeSource {
 
       // Vidmoly: look for m3u8
       const m3u8M = html.match(/(?:file|src)\s*[:=]\s*["'](https?:\/\/[^"']*\.m3u8[^"']*)["']/i);
-      if (m3u8M) return { url: m3u8M[1] };
+      if (m3u8M) return { url: forceHttps(m3u8M[1]) };
 
       // Voe: look for mp4/m3u8
       const voeM = html.match(/(?:source|video_link)\s*[:=]\s*["'](https?:\/\/[^"']*(?:\.mp4|\.m3u8)[^"']*)["']/i);
-      if (voeM) return { url: voeM[1] };
+      if (voeM) return { url: forceHttps(voeM[1]) };
 
       // Generic video URL
       const genericM = html.match(/["'](https?:\/\/[^"']*\.(?:mp4|m3u8|webm)[^"']*)["']/i);
-      if (genericM) return { url: genericM[1] };
+      if (genericM) return { url: forceHttps(genericM[1]) };
 
-      return { url: embedUrl };
+      return { url: forceHttps(embedUrl) };
     } catch {
-      return { url: embedUrl };
+      return { url: forceHttps(embedUrl) };
     }
   }
 

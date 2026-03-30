@@ -62,6 +62,13 @@ export function getSelectedSource() {
   return _selectedSource;
 }
 
+/** Force a fresh ping on next isExtensionAvailable() call. */
+export function resetExtensionCache() {
+  _extReady = null;
+  _extSources = null;
+  _selectedSource = null;
+}
+
 /** Get the list of available sources. */
 export function getAvailableSources() {
   return _extSources || [];
