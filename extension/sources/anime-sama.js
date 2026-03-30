@@ -395,23 +395,29 @@ export class AnimeSamaSource {
           Referer: `${BASE}/`,
           'User-Agent': navigator.userAgent,
         },
+        signal: AbortSignal.timeout(6000),
       });
-      if (!res.ok) return { url: embedUrl };
+      if (!res.ok) return { url: forceHttps(embedUrl) };
       const html = await res.text();
 
-      // Vidmoly: look for m3u8
-      const m3u8M = html.match(/(?:file|src)\s*[:=]\s*["'](https?:\/\/[^"']*\.m3u8[^"']*)["']/i);
+      // Sibnet: player.src([{src: "/v/{token}/{id}.mp4"}]) — relative URL, must prefix domain
+      if (embedUrl.includes('sibnet')) {
+        const sibnetM = /src:\s*["'](\/v\/[^"']+\.mp4)["']/i.exec(html);
+        if (sibnetM) return { url: `https://video.sibnet.ru${sibnetM[1]}` };
+      }
+
+      // m3u8 (Vidmoly, LuluStream, etc.)
+      const m3u8M = /(?:file|src)\s*[:=]\s*["'](https?:\/\/[^"']*\.m3u8[^"']*)["']/i.exec(html);
       if (m3u8M) return { url: forceHttps(m3u8M[1]) };
 
       // Voe: look for mp4/m3u8 in script
-      const voeM = html.match(/(?:source|video_link)\s*[:=]\s*["'](https?:\/\/[^"']*(?:\.mp4|\.m3u8)[^"']*)["']/i);
+      const voeM = /(?:source|video_link)\s*[:=]\s*["'](https?:\/\/[^"']*(?:\.mp4|\.m3u8)[^"']*)["']/i.exec(html);
       if (voeM) return { url: forceHttps(voeM[1]) };
 
-      // Generic: look for any direct video URL
-      const genericM = html.match(/["'](https?:\/\/[^"']*\.(?:mp4|m3u8|webm)[^"']*)["']/i);
+      // Generic: any direct video URL
+      const genericM = /["'](https?:\/\/[^"']*\.(?:mp4|m3u8|webm)[^"']*)["']/i.exec(html);
       if (genericM) return { url: forceHttps(genericM[1]) };
 
-      // If no direct URL found, return the embed URL forced to HTTPS (player will use iframe)
       return { url: forceHttps(embedUrl) };
     } catch {
       return { url: embedUrl };

@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   AVAILABLE_SOURCES,
   handleAction,
@@ -7,6 +9,10 @@ import {
   searchCache,
   SEARCH_CACHE_TTL,
 } from '../extension/background.js';
+
+const { version: MANIFEST_VERSION } = JSON.parse(
+  readFileSync(resolve(process.cwd(), 'extension/manifest.json'), 'utf8')
+);
 
 // ── AVAILABLE_SOURCES ────────────────────────────────────────
 
@@ -27,7 +33,7 @@ describe('handleAction - ping', () => {
   it('returns version, sources list, and selectedSource', async () => {
     const result = await handleAction('ping', {}, {});
     expect(result).toEqual({
-      version: '2.0.4',
+      version: MANIFEST_VERSION,
       sources: AVAILABLE_SOURCES,
       selectedSource: null,
     });

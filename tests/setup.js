@@ -1,8 +1,14 @@
 // Mock browser globals for testing
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 if (typeof navigator === 'undefined') {
   globalThis.navigator = { userAgent: 'Mozilla/5.0 (Test)' };
 }
+
+const _manifest = JSON.parse(
+  readFileSync(resolve(process.cwd(), 'extension/manifest.json'), 'utf8')
+);
 
 // Mock chrome extension APIs for testing
 
@@ -29,6 +35,7 @@ globalThis.chrome = {
     },
     sendMessage: vi.fn(),
     lastError: null,
+    getManifest: () => _manifest,
   },
   tabs: {
     query: vi.fn(async () => []),

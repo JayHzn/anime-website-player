@@ -336,6 +336,7 @@ export class FrenchAnimeSource {
           Referer: `${BASE}/`,
           'User-Agent': navigator.userAgent,
         },
+        signal: AbortSignal.timeout(6000),
       });
       if (!res.ok) return { url: embedUrl };
       const html = await res.text();

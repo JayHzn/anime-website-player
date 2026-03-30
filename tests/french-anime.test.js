@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { FrenchAnimeSource } from '../extension/sources/french-anime.js';
 
 const TIMEOUT = 15000;
+const TIMEOUT_VIDEO = 45000; // getVideoUrl tries multiple sources serially
 const source = new FrenchAnimeSource();
 
 describe('FrenchAnimeSource - search', () => {
@@ -66,10 +67,12 @@ describe('FrenchAnimeSource - getVideoUrl', () => {
     expect(video).toHaveProperty('url');
     expect(video).toHaveProperty('sources');
     expect(video.sources.length).toBeGreaterThan(0);
+    // All returned URLs must be HTTPS
+    expect(video.url).toMatch(/^https:\/\//);
 
     const src = video.sources[0];
     expect(src).toHaveProperty('name');
     expect(src).toHaveProperty('url');
-    expect(src.url).toMatch(/^https?:\/\//);
-  }, TIMEOUT);
+    expect(src.url).toMatch(/^https:\/\//);
+  }, TIMEOUT_VIDEO);
 });

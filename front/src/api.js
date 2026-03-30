@@ -3,8 +3,9 @@ const BASE = import.meta.env.DEV ? '/api' : '';
 // ── Extension bridge ────────────────────────────────────────
 
 // Minimum extension version required by this frontend build.
-// Bump this when a breaking change requires a new extension.
-export const MIN_EXTENSION_VERSION = '2.0.5';
+// Automatically kept in sync with extension/manifest.json — do not edit manually.
+import _manifest from '../../extension/manifest.json';
+export const MIN_EXTENSION_VERSION = _manifest.version;
 
 let _extReady = null; // null = unknown, true/false = detected
 let _extSources = null; // available source names from extension
