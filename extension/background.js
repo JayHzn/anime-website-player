@@ -127,7 +127,7 @@ async function handleSourceAction(action, payload, sender, sourceName, source) {
 export async function handleAction(action, payload, sender) {
   if (action === 'ping') {
     return {
-      version: '2.0.0',
+      version: '2.0.4',
       sources: AVAILABLE_SOURCES,
       selectedSource: await getSelectedSource(),
     };

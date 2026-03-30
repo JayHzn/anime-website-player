@@ -260,19 +260,40 @@ export class FrenchAnimeSource {
     // Sort by host priority
     sources.sort((a, b) => this._hostPriority(a.url) - this._hostPriority(b.url));
 
-    const best = sources[0];
-    const resolved = await this._resolveVideoUrl(best.url);
+    const referer = `${BASE}/${animeId}.html`;
 
+    // Try each source in order — return the first that resolves to a direct video URL
+    for (const src of sources) {
+      const resolved = await this._resolveVideoUrl(src.url);
+      if (this._isDirectUrl(resolved.url)) {
+        return {
+          url: resolved.url,
+          referer,
+          headers: { Referer: referer },
+          subtitles: [],
+          sources,
+        };
+      }
+    }
+
+    // No direct URL found — fall back to best embed URL in iframe mode
+    const best = sources[0];
     return {
-      url: forceHttps(resolved.url || best.url),
-      referer: `${BASE}/${animeId}.html`,
-      headers: { Referer: `${BASE}/${animeId}.html` },
+      type: 'iframe',
+      url: forceHttps(best.url),
+      referer,
+      headers: { Referer: referer },
       subtitles: [],
       sources,
     };
   }
 
   // ── Video host helpers ───────────────────────────────────
+
+  _isDirectUrl(url) {
+    if (!url) return false;
+    return /\.(m3u8|mp4|webm)(\?|$)/i.test(url);
+  }
 
   _getHostName(url) {
     try {

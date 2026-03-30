@@ -27,7 +27,7 @@ describe('handleAction - ping', () => {
   it('returns version, sources list, and selectedSource', async () => {
     const result = await handleAction('ping', {}, {});
     expect(result).toEqual({
-      version: '2.0.0',
+      version: '2.0.4',
       sources: AVAILABLE_SOURCES,
       selectedSource: null,
     });

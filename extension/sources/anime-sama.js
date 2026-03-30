@@ -321,16 +321,28 @@ export class AnimeSamaSource {
       throw new Error(`No video URL found for episode ${epNum}`);
     }
 
-    // Sort by host priority (vidmoly first, then voe, etc.)
+    // Sort by host priority
     sources.sort((a, b) => this._hostPriority(a.url) - this._hostPriority(b.url));
 
+    // Try each source in order — return the first that resolves to a direct video URL
+    for (const src of sources) {
+      const resolved = await this._resolveVideoUrl(src.url);
+      if (this._isDirectUrl(resolved.url)) {
+        return {
+          url: resolved.url,
+          referer: src.url,
+          headers: { Referer: src.url },
+          subtitles: [],
+          sources,
+        };
+      }
+    }
+
+    // No direct URL found — fall back to best embed URL in iframe mode
     const best = sources[0];
-
-    // Try to resolve the actual video URL from the embed page
-    const resolved = await this._resolveVideoUrl(best.url);
-
     return {
-      url: forceHttps(resolved.url || best.url),
+      type: 'iframe',
+      url: forceHttps(best.url),
       referer: best.url,
       headers: { Referer: best.url },
       subtitles: [],
@@ -355,13 +367,24 @@ export class AnimeSamaSource {
     }
   }
 
+  _isDirectUrl(url) {
+    if (!url) return false;
+    return /\.(m3u8|mp4|webm)(\?|$)/i.test(url);
+  }
+
   _hostPriority(url) {
-    if (url.includes('vidmoly')) return 0;
-    if (url.includes('voe')) return 1;
-    if (url.includes('sendvid')) return 2;
-    if (url.includes('sibnet')) return 3;
-    if (url.includes('f16px') || url.includes('fmoonh')) return 4;
-    if (url.includes('streamtape')) return 5;
+    // sibnet: direct mp4 link in <source src="...">
+    if (url.includes('sibnet')) return 0;
+    // sendvid: direct video link accessible
+    if (url.includes('sendvid')) return 1;
+    // f16px/fmoonh: direct video link
+    if (url.includes('f16px') || url.includes('fmoonh')) return 2;
+    // voe: obfuscated JS, sometimes extractable
+    if (url.includes('voe')) return 3;
+    // streamtape: obfuscated token URL
+    if (url.includes('streamtape')) return 4;
+    // vidmoly: redirects to .biz with CF Turnstile, fetch blocked
+    if (url.includes('vidmoly')) return 5;
     return 10;
   }
 

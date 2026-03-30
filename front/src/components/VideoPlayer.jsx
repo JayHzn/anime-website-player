@@ -40,6 +40,7 @@ export default function VideoPlayer({
   const [activeSkip, setActiveSkip] = useState(null); // 'opening' | 'ending' | null
   const [showSkipEditor, setShowSkipEditor] = useState(false);
   const [iframeFallback, setIframeFallback] = useState(null); // embed URL if HLS fails
+  const [iframeLoaded, setIframeLoaded] = useState(false);
   const skipDismissed = useRef(new Set());
   const hideTimeout = useRef(null);
 
@@ -53,6 +54,7 @@ export default function VideoPlayer({
   useEffect(() => {
     setActiveSkip(null);
     setIframeFallback(null);
+    setIframeLoaded(false);
     skipDismissed.current.clear();
   }, [videoData?.url]);
 
@@ -326,12 +328,19 @@ export default function VideoPlayer({
   if (iframeFallback) {
     return (
       <div ref={containerRef} className="relative w-full h-full bg-black">
+        {!iframeLoaded && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black z-10 pointer-events-none">
+            <div className="w-10 h-10 border-2 border-white/10 border-t-accent-primary rounded-full animate-spin" />
+            <p className="text-white/40 text-sm">Chargement du lecteur...</p>
+          </div>
+        )}
         <iframe
           src={iframeFallback}
           className="w-full h-full border-0"
           allowFullScreen
           allow="autoplay; encrypted-media; fullscreen"
           referrerPolicy="no-referrer"
+          onLoad={() => setIframeLoaded(true)}
         />
         <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/80 to-transparent p-4 flex items-center justify-between z-10 pointer-events-auto">
           <div className="flex items-center gap-3">
@@ -383,12 +392,19 @@ export default function VideoPlayer({
   if (isIframe) {
     return (
       <div ref={containerRef} className="relative w-full h-full bg-black">
+        {!iframeLoaded && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black z-10 pointer-events-none">
+            <div className="w-10 h-10 border-2 border-white/10 border-t-accent-primary rounded-full animate-spin" />
+            <p className="text-white/40 text-sm">Chargement du lecteur...</p>
+          </div>
+        )}
         <iframe
           src={videoData.url}
           className="w-full h-full border-0"
           allowFullScreen
           allow="autoplay; encrypted-media; fullscreen"
           referrerPolicy="no-referrer"
+          onLoad={() => setIframeLoaded(true)}
         />
 
         {/* Minimal overlay: back button + episode info + next */}

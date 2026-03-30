@@ -2,9 +2,14 @@ const BASE = import.meta.env.DEV ? '/api' : '';
 
 // ── Extension bridge ────────────────────────────────────────
 
+// Minimum extension version required by this frontend build.
+// Bump this when a breaking change requires a new extension.
+export const MIN_EXTENSION_VERSION = '2.0.5';
+
 let _extReady = null; // null = unknown, true/false = detected
 let _extSources = null; // available source names from extension
 let _selectedSource = null; // currently selected source in extension
+let _extVersion = null; // version string returned by the extension ping
 
 /**
  * Send a request to the Chrome extension via postMessage.
@@ -49,6 +54,7 @@ export async function isExtensionAvailable() {
     _extReady = true;
     _extSources = pingData?.sources || [];
     _selectedSource = pingData?.selectedSource || null;
+    _extVersion = pingData?.version || null;
     console.log('%c[EXT] Extension détectée', 'color:#4ade80;font-weight:bold', { sources: _extSources, selected: _selectedSource });
   } catch {
     _extReady = false;
@@ -62,11 +68,34 @@ export function getSelectedSource() {
   return _selectedSource;
 }
 
+/** Get the version string reported by the extension. */
+export function getExtensionVersion() {
+  return _extVersion;
+}
+
+/** Compare semver strings. Returns true if `a` >= `b`. */
+function semverGte(a, b) {
+  const pa = (a || '0.0.0').split('.').map(Number);
+  const pb = (b || '0.0.0').split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] || 0) > (pb[i] || 0)) return true;
+    if ((pa[i] || 0) < (pb[i] || 0)) return false;
+  }
+  return true;
+}
+
+/** Returns true when the detected extension is older than MIN_EXTENSION_VERSION. */
+export function isExtensionOutdated() {
+  if (!_extVersion) return false;
+  return !semverGte(_extVersion, MIN_EXTENSION_VERSION);
+}
+
 /** Force a fresh ping on next isExtensionAvailable() call. */
 export function resetExtensionCache() {
   _extReady = null;
   _extSources = null;
   _selectedSource = null;
+  _extVersion = null;
 }
 
 /** Get the list of available sources. */

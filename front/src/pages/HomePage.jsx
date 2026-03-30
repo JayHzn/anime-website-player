@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useOutletContext, useNavigate } from 'react-router-dom';
 import { Play, Clock, Trash2, ChevronLeft, ChevronRight, Flame, Film, Sparkles, Puzzle, MousePointer, RefreshCw, CheckCircle, Download, Monitor, Globe, Zap } from 'lucide-react';
-import { api, onCoversUpdate } from '../api';
+import { api, onCoversUpdate, MIN_EXTENSION_VERSION } from '../api';
 
 const EXTENSION_DOWNLOAD_URL = 'https://github.com/JayHzn/anime-website-player/raw/main/extension';
 
@@ -49,6 +49,56 @@ function Step({ number, icon: Icon, title, children, delay }) {
           <h3 className="font-display font-semibold text-white text-sm">{title}</h3>
         </div>
         {children}
+      </div>
+    </div>
+  );
+}
+
+// ── Outdated extension page ───────────────────────────────────
+
+function OutdatedPage() {
+  return (
+    <div className="relative max-w-2xl mx-auto px-4 sm:px-6 py-16 text-center animate-fade-up">
+      <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-amber-500/10 border border-amber-500/20 mb-6">
+        <RefreshCw className="w-10 h-10 text-amber-400" />
+      </div>
+      <h1 className="font-display font-bold text-3xl text-white mb-3">
+        Extension obsolète
+      </h1>
+      <p className="text-white/40 text-base mb-2">
+        Votre extension AnimeHub est trop ancienne pour fonctionner avec cette version du site.
+      </p>
+      <p className="text-white/25 text-sm mb-10">
+        Version minimale requise : <span className="text-amber-400 font-mono">{MIN_EXTENSION_VERSION}</span>
+      </p>
+
+      <a
+        href={EXTENSION_DOWNLOAD_URL}
+        target="_blank"
+        rel="noreferrer"
+        className="inline-flex items-center gap-2.5 px-6 py-3 rounded-xl bg-accent-primary text-white font-semibold text-sm shadow-lg shadow-accent-primary/20 hover:bg-accent-primary/90 transition-all mb-10"
+      >
+        <Download className="w-4 h-4" />
+        Télécharger la nouvelle version
+      </a>
+
+      <div className="bg-bg-card rounded-2xl border border-white/5 p-6 text-left space-y-4">
+        <p className="text-white/50 text-sm font-semibold">Comment mettre à jour :</p>
+        <ol className="space-y-3">
+          {[
+            'Téléchargez la nouvelle extension ci-dessus',
+            'Ouvrez chrome://extensions dans Chrome',
+            'Supprimez l\'ancienne extension AnimeHub',
+            'Glissez-déposez le nouveau fichier .zip (ou dossier décompressé) dans la page',
+          ].map((step, i) => (
+            <li key={i} className="flex items-start gap-3 text-sm text-white/40">
+              <span className="flex-shrink-0 w-5 h-5 rounded-full bg-accent-primary/10 border border-accent-primary/20 flex items-center justify-center text-accent-primary text-xs font-bold mt-0.5">
+                {i + 1}
+              </span>
+              {step}
+            </li>
+          ))}
+        </ol>
       </div>
     </div>
   );
@@ -210,7 +260,7 @@ function SourceTutorial() {
 // ── Main HomePage ────────────────────────────────────────────
 
 export default function HomePage() {
-  const { selectedSource, extMissing } = useOutletContext();
+  const { selectedSource, extMissing, extOutdated } = useOutletContext();
   const navigate = useNavigate();
   const [progress, setProgress] = useState([]);
   const [searchResults, setSearchResults] = useState([]);
@@ -307,14 +357,13 @@ export default function HomePage() {
   }
 
   // Extension not installed → welcome page with download + install tutorial
-  if (extMissing) {
-    return <WelcomePage />;
-  }
+  if (extMissing) return <WelcomePage />;
+
+  // Extension installed but outdated → force update
+  if (extOutdated) return <OutdatedPage />;
 
   // Extension OK but no source selected → source selection tutorial
-  if (!selectedSource) {
-    return <SourceTutorial />;
-  }
+  if (!selectedSource) return <SourceTutorial />;
 
   if (loading) {
     return (

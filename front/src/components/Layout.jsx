@@ -1,7 +1,7 @@
 import { Outlet, Link, useNavigate } from 'react-router-dom';
 import { Search, Play, Home, Clock, X, Puzzle } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { isExtensionAvailable, getSelectedSource, resetExtensionCache } from '../api';
+import { isExtensionAvailable, getSelectedSource, isExtensionOutdated, resetExtensionCache } from '../api';
 
 export default function Layout() {
   const [query, setQuery] = useState('');
@@ -9,12 +9,16 @@ export default function Layout() {
   const navigate = useNavigate();
 
   const [extMissing, setExtMissing] = useState(false);
+  const [extOutdated, setExtOutdated] = useState(false);
   const [bannerDismissed, setBannerDismissed] = useState(false);
 
   function checkExtension() {
     isExtensionAvailable().then((ok) => {
       setExtMissing(!ok);
-      if (ok) setSelectedSource(getSelectedSource());
+      if (ok) {
+        setSelectedSource(getSelectedSource());
+        setExtOutdated(isExtensionOutdated());
+      }
     });
   }
 
@@ -119,7 +123,7 @@ export default function Layout() {
 
       {/* Content */}
       <main className={extMissing && !bannerDismissed ? 'pt-[104px]' : 'pt-16'}>
-        <Outlet context={{ selectedSource, extMissing }} />
+        <Outlet context={{ selectedSource, extMissing, extOutdated }} />
       </main>
     </div>
   );
