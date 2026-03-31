@@ -39,18 +39,16 @@ export default function VideoPlayer({
   const [videoError, setVideoError] = useState(null);
   const [activeSkip, setActiveSkip] = useState(null); // 'opening' | 'ending' | null
   const [showSkipEditor, setShowSkipEditor] = useState(false);
-  const [iframeFallback, setIframeFallback] = useState(null); // embed URL if HLS fails
+  const [visibleIframeUrl, setVisibleIframeUrl] = useState(null); // iframe shown to user (fallback)
   const [iframeLoaded, setIframeLoaded] = useState(false);
   // Iframe URL extraction: load embed in hidden iframe, content script extracts direct URL
-  const [extractUrl, setExtractUrl] = useState(null);   // URL in hidden iframe
+  const [extractUrl, setExtractUrl] = useState(null);    // URL in hidden iframe
   const [extractedUrl, setExtractedUrl] = useState(null); // extracted direct video URL
   const extractTimerRef = useRef(null);
+  // Source cycling: when a source fails, try the next one
+  const embedQueueRef = useRef([]); // remaining embed URLs to try
   const skipDismissed = useRef(new Set());
   const hideTimeout = useRef(null);
-
-  function isExtractable(url) {
-    return !!url;
-  }
 
   // ── Mobile double-tap & tap logic ──────────────────────────
   const lastTap = useRef({ time: 0, x: 0 });
@@ -61,26 +59,60 @@ export default function VideoPlayer({
   // Reset state when video changes
   useEffect(() => {
     setActiveSkip(null);
-    setIframeFallback(null);
+    setVisibleIframeUrl(null);
     setIframeLoaded(false);
     setExtractUrl(null);
     setExtractedUrl(null);
     clearTimeout(extractTimerRef.current);
     skipDismissed.current.clear();
+    // Build the embed URL queue for source cycling.
+    // For direct URLs, exclude the source that produced videoData.url (it already failed or will fail).
+    const allSources = videoData?.sources?.map(s => s.url) || [];
+    const referer = videoData?.referer;
+    embedQueueRef.current = referer
+      ? allSources.filter(u => u !== referer)
+      : allSources;
   }, [videoData?.url]);
 
-  // Start iframe extraction when in iframe mode (unless host is known non-extractable)
+  // Start iframe extraction for all iframe-mode sources
   useEffect(() => {
     if (!isIframe) return;
-    if (!isExtractable(videoData?.url)) return;
-    setExtractUrl(videoData.url);
+    startNextExtraction();
+  }, [isIframe, videoData?.url]);
+
+  // Try the next embed URL from the queue via extraction.
+  // Called on: iframe mode start, or when a source fails to play.
+  function startNextExtraction() {
+    const queue = embedQueueRef.current;
+    if (queue.length === 0) {
+      // All sources exhausted — show the original iframe as last resort
+      const fallback = videoData?.sources?.[0]?.url || videoData?.url;
+      setVisibleIframeUrl(fallback || null);
+      setIsLoading(false);
+      return;
+    }
+    const [next, ...rest] = queue;
+    embedQueueRef.current = rest;
     setExtractedUrl(null);
+    setExtractUrl(next);
+    clearTimeout(extractTimerRef.current);
     extractTimerRef.current = setTimeout(() => {
-      // Extraction timed out — fall back to showing the iframe visibly
+      // Extraction timed out — show this embed as a visible iframe
+      setVisibleIframeUrl(next);
       setExtractUrl(null);
     }, 8000);
-    return () => clearTimeout(extractTimerRef.current);
-  }, [isIframe, videoData?.url]);
+  }
+
+  // Called when a resolved URL (direct or extracted) fails to play.
+  // Moves on to the next source in the queue.
+  function tryNextSource() {
+    if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
+    clearTimeout(extractTimerRef.current);
+    setExtractedUrl(null);
+    setExtractUrl(null);
+    setIsLoading(false);
+    startNextExtraction();
+  }
 
   // Listen for the extracted URL from the content script inside the hidden iframe
   useEffect(() => {
@@ -115,16 +147,8 @@ export default function VideoPlayer({
     setVideoError(null);
 
     const handleError = () => {
-      // If we were using an extracted URL, fall back to the original iframe
-      const embedUrl = extractedUrl ? videoData?.url : videoData.sources?.[0]?.url;
-      if (embedUrl) {
-        console.log('[player] Video failed, falling back to iframe:', embedUrl);
-        setIframeFallback(embedUrl);
-        setIsLoading(false);
-      } else {
-        setIsLoading(false);
-        setVideoError('Impossible de charger la vidéo');
-      }
+      console.log('[player] Video failed, trying next source');
+      tryNextSource();
     };
 
     // Use proxy URL if available (production), otherwise direct URL
@@ -146,19 +170,8 @@ export default function VideoPlayer({
       hls.on(Hls.Events.ERROR, (e, data) => {
         console.error('HLS error:', data);
         if (data.fatal) {
-          hls.destroy();
-          hlsRef.current = null;
-          // If we used an extracted URL, fall back to the original embed iframe
-          const embedUrl = extractedUrl ? videoData?.url : videoData.sources?.[0]?.url;
-          if (embedUrl) {
-            console.log('[player] HLS failed, falling back to iframe:', embedUrl);
-            setIframeFallback(embedUrl);
-            setIsLoading(false);
-            setVideoError(null);
-          } else {
-            setIsLoading(false);
-            setVideoError('Erreur de lecture HLS');
-          }
+          console.log('[player] HLS fatal error, trying next source');
+          tryNextSource();
         }
       });
       hlsRef.current = hls;
@@ -368,8 +381,8 @@ export default function VideoPlayer({
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
-  // ── Iframe fallback: HLS failed, use embed player ──
-  if (iframeFallback) {
+  // ── Visible iframe: extraction timed out, or all sources exhausted ──
+  if (visibleIframeUrl) {
     return (
       <div ref={containerRef} className="relative w-full h-full bg-black">
         {!iframeLoaded && (
@@ -379,7 +392,7 @@ export default function VideoPlayer({
           </div>
         )}
         <iframe
-          src={iframeFallback}
+          src={visibleIframeUrl}
           className="w-full h-full border-0"
           allowFullScreen
           allow="autoplay; encrypted-media; fullscreen"
@@ -432,44 +445,21 @@ export default function VideoPlayer({
     );
   }
 
-  // ── Iframe mode: try to extract direct URL first, then show iframe ──
-  if (isIframe && !extractedUrl) {
-    const isExtracting = !!extractUrl;
+  // ── Extraction in progress: hidden iframe for any source cycling, not just initial iframe mode ──
+  if (!extractedUrl && extractUrl) {
     return (
       <div ref={containerRef} className="relative w-full h-full bg-black">
-        {isExtracting ? (
-          // Hidden iframe — content script will extract the video URL
-          <>
-            <iframe
-              key={extractUrl}
-              src={extractUrl}
-              className="absolute w-0 h-0 opacity-0 pointer-events-none"
-              allow="autoplay; encrypted-media"
-            />
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black z-10 pointer-events-none">
-              <div className="w-10 h-10 border-2 border-white/10 border-t-accent-primary rounded-full animate-spin" />
-              <p className="text-white/40 text-sm">Chargement du lecteur...</p>
-            </div>
-          </>
-        ) : (
-          // Extraction timed out or not supported — show iframe directly
-          <>
-            {!iframeLoaded && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black z-10 pointer-events-none">
-                <div className="w-10 h-10 border-2 border-white/10 border-t-accent-primary rounded-full animate-spin" />
-                <p className="text-white/40 text-sm">Chargement du lecteur...</p>
-              </div>
-            )}
-            <iframe
-              src={videoData.url}
-              className="w-full h-full border-0"
-              allowFullScreen
-              allow="autoplay; encrypted-media; fullscreen"
-              referrerPolicy="no-referrer"
-              onLoad={() => setIframeLoaded(true)}
-            />
-          </>
-        )}
+        {/* Hidden iframe — content script will extract the video URL */}
+        <iframe
+          key={extractUrl}
+          src={extractUrl}
+          className="absolute w-0 h-0 opacity-0 pointer-events-none"
+          allow="autoplay; encrypted-media"
+        />
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black z-10 pointer-events-none">
+          <div className="w-10 h-10 border-2 border-white/10 border-t-accent-primary rounded-full animate-spin" />
+          <p className="text-white/40 text-sm">Chargement du lecteur...</p>
+        </div>
 
         {/* Minimal overlay: back button + episode info + nav */}
         <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/80 to-transparent p-4 flex items-center justify-between z-10 pointer-events-auto">
