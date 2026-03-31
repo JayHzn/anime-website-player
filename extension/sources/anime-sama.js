@@ -317,15 +317,17 @@ export class AnimeSamaSource {
       }
     }
 
-    if (sources.length === 0) {
+    // Filter out sibnet (dropped — CDN requires session cookies)
+    const filtered = sources.filter(s => !s.url.includes('sibnet'));
+    const finalSources = filtered.length > 0 ? filtered : sources;
+    finalSources.sort((a, b) => this._hostPriority(a.url) - this._hostPriority(b.url));
+
+    if (finalSources.length === 0) {
       throw new Error(`No video URL found for episode ${epNum}`);
     }
 
-    // Sort by host priority
-    sources.sort((a, b) => this._hostPriority(a.url) - this._hostPriority(b.url));
-
     // Try each source in order — return the first that resolves to a direct video URL
-    for (const src of sources) {
+    for (const src of finalSources) {
       const resolved = await this._resolveVideoUrl(src.url);
       if (this._isDirectUrl(resolved.url)) {
         return {
@@ -333,20 +335,20 @@ export class AnimeSamaSource {
           referer: src.url,
           headers: { Referer: src.url },
           subtitles: [],
-          sources,
+          sources: finalSources,
         };
       }
     }
 
     // No direct URL found — fall back to best embed URL in iframe mode
-    const best = sources[0];
+    const best = finalSources[0];
     return {
       type: 'iframe',
       url: forceHttps(best.url),
       referer: best.url,
       headers: { Referer: best.url },
       subtitles: [],
-      sources,
+      sources: finalSources,
     };
   }
 
@@ -358,7 +360,6 @@ export class AnimeSamaSource {
       if (host.includes('vidmoly')) return 'Vidmoly';
       if (host.includes('voe')) return 'Voe';
       if (host.includes('sendvid')) return 'SendVid';
-      if (host.includes('sibnet')) return 'Sibnet';
       if (host.includes('streamtape')) return 'Streamtape';
       if (host.includes('f16px') || host.includes('fmoonh')) return 'F16px';
       return host;
@@ -381,8 +382,7 @@ export class AnimeSamaSource {
     if (url.includes('voe')) return 2;
     // streamtape: obfuscated token URL
     if (url.includes('streamtape')) return 3;
-    // sibnet: session cookies required for CDN → iframe only (but good iframe)
-    if (url.includes('sibnet')) return 4;
+
     // vidmoly: CF Turnstile blocks fetch → iframe only
     if (url.includes('vidmoly')) return 5;
     return 10;
@@ -399,12 +399,6 @@ export class AnimeSamaSource {
       });
       if (!res.ok) return { url: forceHttps(embedUrl) };
       const html = await res.text();
-
-      // Sibnet: CDN URL requires session cookies from the embed page — not transferable
-      // to the VideoPlayer. Skip extraction; let the iframe fallback handle it.
-      if (embedUrl.includes('sibnet')) {
-        return { url: forceHttps(embedUrl) };
-      }
 
       // m3u8 (Vidmoly, LuluStream, etc.)
       const m3u8M = /(?:file|src)\s*[:=]\s*["'](https?:\/\/[^"']*\.m3u8[^"']*)["']/i.exec(html);

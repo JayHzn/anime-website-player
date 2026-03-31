@@ -252,10 +252,10 @@ export class FrenchAnimeSource {
       throw new Error(`No video URLs found for episode ${epNum}`);
     }
 
-    const sources = urls.map((url) => ({
-      name: this._getHostName(url),
-      url: forceHttps(url),
-    }));
+    const allSources = urls
+      .filter(url => !url.includes('sibnet'))
+      .map((url) => ({ name: this._getHostName(url), url: forceHttps(url) }));
+    const sources = allSources.length > 0 ? allSources : urls.map(url => ({ name: this._getHostName(url), url: forceHttps(url) }));
 
     // Sort by host priority
     sources.sort((a, b) => this._hostPriority(a.url) - this._hostPriority(b.url));
@@ -305,7 +305,6 @@ export class FrenchAnimeSource {
       if (host.includes('savefiles')) return 'SaveFiles';
       if (host.includes('up4fun')) return 'Up4Fun';
       if (host.includes('sendvid')) return 'SendVid';
-      if (host.includes('sibnet')) return 'Sibnet';
       if (host.includes('streamtape')) return 'Streamtape';
       return host;
     } catch {
@@ -316,11 +315,10 @@ export class FrenchAnimeSource {
   _hostPriority(url) {
     // luluvid/lulustream: direct m3u8 in JWPlayer setup, no JS challenge
     if (url.includes('luluvid') || url.includes('lulustream')) return 0;
-    // sendvid/sibnet: direct video fallback
+    // sendvid: direct video fallback
     if (url.includes('sendvid')) return 1;
-    if (url.includes('sibnet')) return 2;
     // vidmoly: redirects to .biz which has CF Turnstile → fetch blocked
-    if (url.includes('vidmoly')) return 3;
+    if (url.includes('vidmoly')) return 2;
     // voe variants: obfuscated JS, no static URL
     if (url.includes('voe') || url.includes('dianaavoidthey')) return 4;
     // savefiles: form POST + files expire quickly
