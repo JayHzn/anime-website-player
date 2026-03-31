@@ -41,8 +41,16 @@ export default function VideoPlayer({
   const [showSkipEditor, setShowSkipEditor] = useState(false);
   const [iframeFallback, setIframeFallback] = useState(null); // embed URL if HLS fails
   const [iframeLoaded, setIframeLoaded] = useState(false);
+  // Iframe URL extraction: load embed in hidden iframe, content script extracts direct URL
+  const [extractUrl, setExtractUrl] = useState(null);   // URL in hidden iframe
+  const [extractedUrl, setExtractedUrl] = useState(null); // extracted direct video URL
+  const extractTimerRef = useRef(null);
   const skipDismissed = useRef(new Set());
   const hideTimeout = useRef(null);
+
+  function isExtractable(url) {
+    return !!url;
+  }
 
   // ── Mobile double-tap & tap logic ──────────────────────────
   const lastTap = useRef({ time: 0, x: 0 });
@@ -55,24 +63,60 @@ export default function VideoPlayer({
     setActiveSkip(null);
     setIframeFallback(null);
     setIframeLoaded(false);
+    setExtractUrl(null);
+    setExtractedUrl(null);
+    clearTimeout(extractTimerRef.current);
     skipDismissed.current.clear();
   }, [videoData?.url]);
 
+  // Start iframe extraction when in iframe mode (unless host is known non-extractable)
+  useEffect(() => {
+    if (!isIframe) return;
+    if (!isExtractable(videoData?.url)) return;
+    setExtractUrl(videoData.url);
+    setExtractedUrl(null);
+    extractTimerRef.current = setTimeout(() => {
+      // Extraction timed out — fall back to showing the iframe visibly
+      setExtractUrl(null);
+    }, 8000);
+    return () => clearTimeout(extractTimerRef.current);
+  }, [isIframe, videoData?.url]);
+
+  // Listen for the extracted URL from the content script inside the hidden iframe
+  useEffect(() => {
+    if (!extractUrl) return;
+    function onMessage(e) {
+      if (e.data?.type !== 'ANIME_EXT_VIDEO_URL') return;
+      const url = e.data.url;
+      if (!url) return;
+      clearTimeout(extractTimerRef.current);
+      setExtractedUrl(url);
+      setExtractUrl(null);
+    }
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [extractUrl]);
+
   // Setup HLS or native video (only for direct video URLs)
   useEffect(() => {
-    if (isIframe) {
+    // In iframe mode without an extracted URL, skip HLS setup
+    if (isIframe && !extractedUrl) {
       setIsLoading(false);
       return;
     }
 
+    // Use extractedUrl (from iframe extractor) if available, else the direct URL
+    const activeUrl = extractedUrl || videoData?.url;
+
     const video = videoRef.current;
-    if (!video || !videoData?.url) return;
+    if (!video || !activeUrl) return;
 
     setIsLoading(true);
     setVideoError(null);
 
     const handleError = () => {
-      const embedUrl = videoData.sources?.[0]?.url;
+      // If we were using an extracted URL, fall back to the original iframe
+      const embedUrl = extractedUrl ? videoData?.url : videoData.sources?.[0]?.url;
       if (embedUrl) {
         console.log('[player] Video failed, falling back to iframe:', embedUrl);
         setIframeFallback(embedUrl);
@@ -84,7 +128,7 @@ export default function VideoPlayer({
     };
 
     // Use proxy URL if available (production), otherwise direct URL
-    const hlsUrl = videoData.proxy_url || videoData.url;
+    const hlsUrl = extractedUrl || videoData.proxy_url || videoData.url;
 
     const isHls = hlsUrl.includes('.m3u8') || hlsUrl.startsWith('/proxy/hls/');
     if (isHls && Hls.isSupported()) {
@@ -104,8 +148,8 @@ export default function VideoPlayer({
         if (data.fatal) {
           hls.destroy();
           hlsRef.current = null;
-          // Auto-fallback to iframe embed if available
-          const embedUrl = videoData.sources?.[0]?.url;
+          // If we used an extracted URL, fall back to the original embed iframe
+          const embedUrl = extractedUrl ? videoData?.url : videoData.sources?.[0]?.url;
           if (embedUrl) {
             console.log('[player] HLS failed, falling back to iframe:', embedUrl);
             setIframeFallback(embedUrl);
@@ -138,7 +182,7 @@ export default function VideoPlayer({
       }
       video.removeEventListener('error', handleError);
     };
-  }, [videoData?.url]);
+  }, [videoData?.url, extractedUrl]);
 
   // Seek to initialTime when it arrives late (after video already loaded)
   const appliedInitialTime = useRef(false);
@@ -156,14 +200,14 @@ export default function VideoPlayer({
 
   // Progress reporting
   useEffect(() => {
-    if (isIframe) return;
+    if (isIframe && !extractedUrl) return;
     progressInterval.current = setInterval(() => {
       if (videoRef.current && !videoRef.current.paused) {
         onTimeUpdate?.(videoRef.current.currentTime);
       }
     }, 5000); // report every 5 seconds
     return () => clearInterval(progressInterval.current);
-  }, [onTimeUpdate, isIframe]);
+  }, [onTimeUpdate, isIframe, extractedUrl]);
 
   // Auto-hide controls
   const resetHideTimer = useCallback(() => {
@@ -182,7 +226,7 @@ export default function VideoPlayer({
   // Keyboard shortcuts
   useEffect(() => {
     const handleKey = (e) => {
-      if (isIframe) {
+      if (isIframe && !extractedUrl) {
         if (e.key === 'f') toggleFullscreen();
         return;
       }
@@ -388,26 +432,46 @@ export default function VideoPlayer({
     );
   }
 
-  // ── Iframe mode: embed the player in an iframe ──
-  if (isIframe) {
+  // ── Iframe mode: try to extract direct URL first, then show iframe ──
+  if (isIframe && !extractedUrl) {
+    const isExtracting = !!extractUrl;
     return (
       <div ref={containerRef} className="relative w-full h-full bg-black">
-        {!iframeLoaded && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black z-10 pointer-events-none">
-            <div className="w-10 h-10 border-2 border-white/10 border-t-accent-primary rounded-full animate-spin" />
-            <p className="text-white/40 text-sm">Chargement du lecteur...</p>
-          </div>
+        {isExtracting ? (
+          // Hidden iframe — content script will extract the video URL
+          <>
+            <iframe
+              key={extractUrl}
+              src={extractUrl}
+              className="absolute w-0 h-0 opacity-0 pointer-events-none"
+              allow="autoplay; encrypted-media"
+            />
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black z-10 pointer-events-none">
+              <div className="w-10 h-10 border-2 border-white/10 border-t-accent-primary rounded-full animate-spin" />
+              <p className="text-white/40 text-sm">Chargement du lecteur...</p>
+            </div>
+          </>
+        ) : (
+          // Extraction timed out or not supported — show iframe directly
+          <>
+            {!iframeLoaded && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black z-10 pointer-events-none">
+                <div className="w-10 h-10 border-2 border-white/10 border-t-accent-primary rounded-full animate-spin" />
+                <p className="text-white/40 text-sm">Chargement du lecteur...</p>
+              </div>
+            )}
+            <iframe
+              src={videoData.url}
+              className="w-full h-full border-0"
+              allowFullScreen
+              allow="autoplay; encrypted-media; fullscreen"
+              referrerPolicy="no-referrer"
+              onLoad={() => setIframeLoaded(true)}
+            />
+          </>
         )}
-        <iframe
-          src={videoData.url}
-          className="w-full h-full border-0"
-          allowFullScreen
-          allow="autoplay; encrypted-media; fullscreen"
-          referrerPolicy="no-referrer"
-          onLoad={() => setIframeLoaded(true)}
-        />
 
-        {/* Minimal overlay: back button + episode info + next */}
+        {/* Minimal overlay: back button + episode info + nav */}
         <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/80 to-transparent p-4 flex items-center justify-between z-10 pointer-events-auto">
           <div className="flex items-center gap-3">
             <button onClick={onBack} className="p-1.5 rounded-lg hover:bg-white/10 transition">

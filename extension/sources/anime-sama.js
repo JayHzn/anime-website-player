@@ -373,17 +373,17 @@ export class AnimeSamaSource {
   }
 
   _hostPriority(url) {
-    // sibnet: direct mp4 link in <source src="...">
-    if (url.includes('sibnet')) return 0;
-    // sendvid: direct video link accessible
+    // f16px/fmoonh: direct HLS/mp4 link extractable from page
+    if (url.includes('f16px') || url.includes('fmoonh')) return 0;
+    // sendvid: direct video link when file exists
     if (url.includes('sendvid')) return 1;
-    // f16px/fmoonh: direct video link
-    if (url.includes('f16px') || url.includes('fmoonh')) return 2;
     // voe: obfuscated JS, sometimes extractable
-    if (url.includes('voe')) return 3;
+    if (url.includes('voe')) return 2;
     // streamtape: obfuscated token URL
-    if (url.includes('streamtape')) return 4;
-    // vidmoly: redirects to .biz with CF Turnstile, fetch blocked
+    if (url.includes('streamtape')) return 3;
+    // sibnet: session cookies required for CDN → iframe only (but good iframe)
+    if (url.includes('sibnet')) return 4;
+    // vidmoly: CF Turnstile blocks fetch → iframe only
     if (url.includes('vidmoly')) return 5;
     return 10;
   }
@@ -400,10 +400,10 @@ export class AnimeSamaSource {
       if (!res.ok) return { url: forceHttps(embedUrl) };
       const html = await res.text();
 
-      // Sibnet: player.src([{src: "/v/{token}/{id}.mp4"}]) — relative URL, must prefix domain
+      // Sibnet: CDN URL requires session cookies from the embed page — not transferable
+      // to the VideoPlayer. Skip extraction; let the iframe fallback handle it.
       if (embedUrl.includes('sibnet')) {
-        const sibnetM = /src:\s*["'](\/v\/[^"']+\.mp4)["']/i.exec(html);
-        if (sibnetM) return { url: `https://video.sibnet.ru${sibnetM[1]}` };
+        return { url: forceHttps(embedUrl) };
       }
 
       // m3u8 (Vidmoly, LuluStream, etc.)

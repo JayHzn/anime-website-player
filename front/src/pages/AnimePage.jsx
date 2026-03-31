@@ -50,18 +50,22 @@ export default function AnimePage() {
   const currentLang = animeId.endsWith('-vf') ? 'VF' : 'VOSTFR';
 
   useEffect(() => {
-    loadAnime();
+    let cancelled = false;
+    loadAnime(cancelled, (v) => { if (!cancelled) setAltLang(v); });
+    return () => { cancelled = true; };
   }, [source, animeId]);
 
-  async function loadAnime() {
+  async function loadAnime(cancelled, setAltLangSafe) {
     setLoading(true);
     setAltLang(null);
+    let resolvedInfo = null;
     try {
       const [eps, prog, info] = await Promise.all([
         api.getEpisodes(source, animeId),
         api.getAnimeProgress(animeId).catch(() => null),
         api.getAnimeInfo(source, animeId).catch(() => null),
       ]);
+      if (cancelled) return;
       setEpisodes(eps);
       setProgress(prog);
       // Use cover passed via navigation state (from catalogue) — more reliable than Jikan search
@@ -69,14 +73,19 @@ export default function AnimePage() {
       if (info) {
         if (navCover) info.cover = navCover;
         setAnimeInfo(info);
+        resolvedInfo = info;
       } else if (navCover) {
-        setAnimeInfo({ id: animeId, title: animeId.replace(/-/g, ' '), cover: navCover, type: '', year: null });
+        const fallback = { id: animeId, title: animeId.replace(/-/g, ' '), cover: navCover, type: '', year: null };
+        setAnimeInfo(fallback);
+        resolvedInfo = fallback;
       }
     } catch (e) {
       console.error(e);
     } finally {
-      setLoading(false);
+      if (!cancelled) setLoading(false);
     }
+
+    if (cancelled) return;
 
     // Find alternate VF/VOSTFR version (non-blocking — don't delay page render)
     try {
@@ -88,17 +97,21 @@ export default function AnimePage() {
       try {
         const altEps = await api.getEpisodes(source, directSlug);
         if (altEps && altEps.length > 0) {
-          setAltLang({ id: directSlug, lang: altLangLabel });
+          setAltLangSafe({ id: directSlug, lang: altLangLabel });
           return;
         }
       } catch { /* try strategy 2 */ }
 
+      if (cancelled) return;
+
       // Strategy 2: search by title variants, match closest slug
-      const title = animeInfo?.title || animeId;
+      // Use resolvedInfo from this call (not stale animeInfo state)
+      const title = resolvedInfo?.title || animeId;
       const terms = getSearchTerms(title);
       const baseSlug = isVF ? animeId.replace(/-vf$/, '') : animeId;
 
       for (const term of terms) {
+        if (cancelled) return;
         const searchQuery = isVF ? term : term + ' VF';
         const results = await api.search(searchQuery, source);
         const altResult = results.find((r) => {
@@ -109,7 +122,7 @@ export default function AnimePage() {
           return rBase === baseSlug || rBase.includes(baseSlug);
         });
         if (altResult) {
-          setAltLang({ id: altResult.id, lang: altLangLabel });
+          setAltLangSafe({ id: altResult.id, lang: altLangLabel });
           break;
         }
       }
