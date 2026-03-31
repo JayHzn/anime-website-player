@@ -268,6 +268,7 @@ export class FrenchAnimeSource {
       if (this._isDirectUrl(resolved.url)) {
         return {
           url: resolved.url,
+          sourceUrl: src.url, // embed URL that produced the direct URL (for source cycling)
           referer,
           headers: { Referer: referer },
           subtitles: [],

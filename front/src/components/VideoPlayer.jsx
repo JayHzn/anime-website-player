@@ -68,9 +68,10 @@ export default function VideoPlayer({
     // Build the embed URL queue for source cycling.
     // For direct URLs, exclude the source that produced videoData.url (it already failed or will fail).
     const allSources = videoData?.sources?.map(s => s.url) || [];
-    const referer = videoData?.referer;
-    embedQueueRef.current = referer
-      ? allSources.filter(u => u !== referer)
+    // sourceUrl = embed URL that produced the direct URL (set explicitly, or falls back to referer for anime-sama)
+    const usedSourceUrl = videoData?.sourceUrl || videoData?.referer;
+    embedQueueRef.current = usedSourceUrl
+      ? allSources.filter(u => u !== usedSourceUrl)
       : allSources;
   }, [videoData?.url]);
 

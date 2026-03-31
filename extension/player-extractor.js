@@ -9,8 +9,8 @@
 //      that load the URL asynchronously, e.g. sibnet, wasm-obfuscated players)
 
 (function () {
-  // Only act when inside an iframe
-  if (window === window.top) return;
+  // Only act when inside an iframe (self/top are page globals, unambiguous in content scripts)
+  if (self === top) return; // NOSONAR(javascript:S3403)
 
   function injectPageScript() {
     const script = document.createElement('script');
@@ -70,19 +70,28 @@
         try {
           var players = Object.values(videojs.getPlayers() || {});
           for (var i = 0; i < players.length; i++) {
-            var src = players[i] && players[i].currentSrc && players[i].currentSrc();
-            if (src) { send(src); return true; }
+            var p = players[i];
+            if (!p) continue;
+            // currentSrc() — available after load starts
+            var src = p.currentSrc && p.currentSrc();
+            if (src && !/^blob:/.test(src)) { send(src); return true; }
+            // currentSources() — available immediately after player.src() call
+            var srcs = p.currentSources && p.currentSources();
+            if (srcs && srcs[0] && srcs[0].src) { send(srcs[0].src); return true; }
           }
         } catch(e) {}
         return false;
       }
 
-      // ── Strategy 5: video element src ─────────────────────────────────────
+      // ── Strategy 5: video element src / currentSrc property ───────────────
       function tryVideoElement() {
-        var video = document.querySelector('video[src]');
-        if (video) { send(video.src); return true; }
+        var video = document.querySelector('video');
+        if (video) {
+          var src = video.currentSrc || video.src;
+          if (src && !/^blob:/.test(src)) { send(src); return true; }
+        }
         var source = document.querySelector('video source[src]');
-        if (source) { send(source.src); return true; }
+        if (source && source.src) { send(source.src); return true; }
         return false;
       }
 
@@ -90,8 +99,22 @@
         return tryJWPlayer() || tryVideoJS() || tryVideoElement();
       }
 
+      // ── Strategy 6: force video.load() to resolve preload:none players ────
+      // (VideoJS with preload:none only sets src on the <video> element after load)
+      function forceLoadAndListen() {
+        var video = document.querySelector('video');
+        if (!video) return;
+        video.muted = true;
+        video.addEventListener('loadstart', function () {
+          var src = video.currentSrc || video.src;
+          if (src && !/^blob:/.test(src)) send(src);
+        }, { once: true });
+        try { video.load(); } catch(e) {}
+      }
+
       // Try static strategies after player init (XHR/fetch interception is already active)
       if (!tryStatic()) {
+        forceLoadAndListen();
         setTimeout(function(){ if (!tryStatic()) setTimeout(tryStatic, 3000); }, 1500);
       }
     })();`;
