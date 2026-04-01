@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useOutletContext, useNavigate } from 'react-router-dom';
-import { Play, Clock, Trash2, ChevronLeft, ChevronRight, Flame, Film, Sparkles, Puzzle, MousePointer, RefreshCw, CheckCircle, Download, Monitor, Globe, Zap } from 'lucide-react';
+import { Play, Clock, Trash2, ChevronLeft, ChevronRight, Flame, Film, Sparkles, Puzzle, MousePointer, RefreshCw, CheckCircle, Download, Monitor, Globe, Zap, ArrowRight } from 'lucide-react';
 import { api, onCoversUpdate, MIN_EXTENSION_VERSION } from '../api';
 
 const EXTENSION_DOWNLOAD_URL = 'https://github.com/JayHzn/anime-website-player/raw/main/extension';
@@ -208,7 +208,32 @@ function WelcomePage() {
 
 // ── Source tutorial (extension OK, no source selected) ────────
 
-function SourceTutorial() {
+function SourceTutorial({ mobile }) {
+  const navigate = useNavigate();
+
+  if (mobile) {
+    return (
+      <div className="relative max-w-lg mx-auto px-4 sm:px-6 py-16 text-center animate-fade-up">
+        <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-accent-primary/10 border border-accent-primary/20 mb-6">
+          <Globe className="w-8 h-8 text-accent-primary" />
+        </div>
+        <h1 className="font-display font-bold text-3xl text-white mb-3">
+          Choisissez une source
+        </h1>
+        <p className="text-white/50 text-base max-w-md mx-auto mb-10">
+          Selectionnez la source depuis laquelle vous souhaitez regarder vos animes.
+        </p>
+        <button
+          onClick={() => navigate('/sources')}
+          className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-accent-primary text-white font-semibold text-sm hover:bg-accent-glow transition-all shadow-lg shadow-accent-primary/20"
+        >
+          Choisir une source
+          <ArrowRight className="w-4 h-4" />
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="relative max-w-3xl mx-auto px-4 sm:px-6 py-16">
       {/* Header */}
@@ -260,7 +285,7 @@ function SourceTutorial() {
 // ── Main HomePage ────────────────────────────────────────────
 
 export default function HomePage() {
-  const { selectedSource, extMissing, extOutdated } = useOutletContext();
+  const { selectedSource, extMissing, extOutdated, mobile } = useOutletContext();
   const navigate = useNavigate();
   const [progress, setProgress] = useState([]);
   const [searchResults, setSearchResults] = useState([]);
@@ -363,7 +388,7 @@ export default function HomePage() {
   if (extOutdated) return <OutdatedPage />;
 
   // Extension OK but no source selected → source selection tutorial
-  if (!selectedSource) return <SourceTutorial />;
+  if (!selectedSource) return <SourceTutorial mobile={mobile} />;
 
   if (loading) {
     return (

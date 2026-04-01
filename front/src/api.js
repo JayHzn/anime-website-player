@@ -11,6 +11,7 @@ let _extReady = null; // null = unknown, true/false = detected
 let _extSources = null; // available source names from extension
 let _selectedSource = null; // currently selected source in extension
 let _extVersion = null; // version string returned by the extension ping
+let _sourceMeta = null; // rich source metadata (mobile only)
 
 /**
  * Send a request to the Chrome extension via postMessage.
@@ -56,6 +57,7 @@ export async function isExtensionAvailable() {
     _extSources = pingData?.sources || [];
     _selectedSource = pingData?.selectedSource || null;
     _extVersion = pingData?.version || null;
+    _sourceMeta = pingData?.sourceMeta || null;
     console.log('%c[EXT] Extension détectée', 'color:#4ade80;font-weight:bold', { sources: _extSources, selected: _selectedSource });
   } catch {
     _extReady = false;
@@ -97,11 +99,22 @@ export function resetExtensionCache() {
   _extSources = null;
   _selectedSource = null;
   _extVersion = null;
+  _sourceMeta = null;
 }
 
 /** Get the list of available sources. */
 export function getAvailableSources() {
   return _extSources || [];
+}
+
+/** Get rich source metadata (mobile only, null on desktop). */
+export function getSourceMeta() {
+  return _sourceMeta;
+}
+
+/** Returns true when running inside the mobile app (bridge returns sourceMeta). */
+export function isMobileApp() {
+  return _sourceMeta !== null;
 }
 
 // Reset detection when extension announces itself
@@ -174,6 +187,9 @@ export const api = {
 
   retryCovers: (items, source) =>
     extRequest('retryCovers', { items, source }),
+
+  selectSource: (source) =>
+    extRequest('selectSource', { source }),
 
   // Storage operations → always backend
   getSources: async () => {

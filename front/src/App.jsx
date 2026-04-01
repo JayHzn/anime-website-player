@@ -7,6 +7,7 @@ const SearchPage = lazy(() => import('./pages/SearchPage'));
 const AnimePage = lazy(() => import('./pages/AnimePage'));
 const WatchPage = lazy(() => import('./pages/WatchPage'));
 const HistoryPage = lazy(() => import('./pages/HistoryPage'));
+const SourcesPage = lazy(() => import('./pages/SourcesPage'));
 
 const PageLoader = () => (
   <div className="min-h-screen flex items-center justify-center">
@@ -23,6 +24,7 @@ export default function App() {
             <Route path="/" element={<HomePage />} />
             <Route path="/search" element={<SearchPage />} />
             <Route path="/history" element={<HistoryPage />} />
+            <Route path="/sources" element={<SourcesPage />} />
             <Route path="/anime/:source/:animeId" element={<AnimePage />} />
           </Route>
           {/* Watch page is full-screen, no layout */}

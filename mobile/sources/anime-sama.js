@@ -1,9 +1,12 @@
-// ── Anime-sama.to source ─────────────────────────────────────
-// Scrapes anime-sama.to from the user's browser via the extension.
+// ── Anime-sama.to source — Mobile (React Native) version ─────
+// Adapted from extension/sources/anime-sama.js
+// Change: navigator.userAgent → hardcoded UA string
 
 const BASE = 'https://anime-sama.to';
 const SEARCH_URL = `${BASE}/template-php/defaut/fetch.php`;
 const COVER_BASE = 'https://raw.githubusercontent.com/Anime-Sama/IMG/img/contenu';
+
+const UA = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36';
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -20,7 +23,6 @@ function matchAll(html, regex) {
   return results;
 }
 
-
 function stripTags(html) {
   return html.replace(/<[^>]*>/g, '').trim();
 }
@@ -36,7 +38,6 @@ function decodeEntities(str) {
 }
 
 function slugFromUrl(url) {
-  // /catalogue/naruto/ → naruto
   const m = url.match(/\/catalogue\/([^/]+)/);
   return m ? m[1] : '';
 }
@@ -60,7 +61,6 @@ export class AnimeSamaSource {
     if (!res.ok) return [];
     const html = await res.text();
 
-    // Parse search results: <a href="..." class="asn-search-result">
     const results = [];
     const cardRe = /<a[^>]*class="asn-search-result"[^>]*>([\s\S]*?)<\/a>/gi;
     for (const m of matchAll(html, cardRe)) {
@@ -89,11 +89,11 @@ export class AnimeSamaSource {
     return results;
   }
 
-  // ── Catalogue (empty search = browse) ────────────────────
+  // ── Catalogue ────────────────────────────────────────────
 
   async _getCatalogue() {
     const res = await fetch(`${BASE}/catalogue/`, {
-      headers: { 'User-Agent': navigator.userAgent },
+      headers: { 'User-Agent': UA },
     });
     if (!res.ok) return [];
     const html = await res.text();
@@ -129,18 +129,17 @@ export class AnimeSamaSource {
     return results;
   }
 
-  // ── Latest episodes (homepage daily releases) ────────────
+  // ── Latest episodes ──────────────────────────────────────
 
   async getLatestEpisodes() {
     const res = await fetch(`${BASE}/`, {
-      headers: { 'User-Agent': navigator.userAgent },
+      headers: { 'User-Agent': UA },
     });
     if (!res.ok) return [];
     const html = await res.text();
 
     const results = [];
     const seen = new Set();
-    // anime-card-premium cards on the homepage
     const cardRe = /<div[^>]*class="[^"]*anime-card-premium[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>\s*<\/a>\s*<\/div>/gi;
 
     for (const m of matchAll(html, cardRe)) {
@@ -167,14 +166,14 @@ export class AnimeSamaSource {
         cover,
         type: 'Anime',
         latestEpisode,
-        latestEpisodeId: null, // will be resolved when user clicks
+        latestEpisodeId: null,
         source: 'anime-sama',
       });
     }
     return results;
   }
 
-  // ── Season anime (catalogue) ─────────────────────────────
+  // ── Season anime ─────────────────────────────────────────
 
   async getSeasonAnime() {
     return this._getCatalogue();
@@ -185,32 +184,26 @@ export class AnimeSamaSource {
   async getAnimeInfo(animeId) {
     const slug = animeId;
     const res = await fetch(`${BASE}/catalogue/${slug}/`, {
-      headers: { 'User-Agent': navigator.userAgent },
+      headers: { 'User-Agent': UA },
     });
     if (!res.ok) throw new Error(`Anime not found: ${slug}`);
     const html = await res.text();
 
-    // Title
     const titleM = html.match(/<h4[^>]*id="titreOeuvre"[^>]*>([\s\S]*?)<\/h4>/i);
     const title = titleM ? decodeEntities(stripTags(titleM[1])) : slug;
 
-    // Alt title
     const altM = html.match(/<h2[^>]*id="titreAlter"[^>]*>([\s\S]*?)<\/h2>/i);
     const altTitle = altM ? decodeEntities(stripTags(altM[1])) : '';
 
-    // Cover
     const coverM = html.match(/<img[^>]*id="coverOeuvre"[^>]*src="([^"]*)"[^>]*/i);
     const cover = coverM ? coverM[1] : `${COVER_BASE}/${slug}.jpg`;
 
-    // Synopsis
     const synopsisM = html.match(/Synopsis\s*<\/h[^>]*>([\s\S]*?)<(?:h\d|div|section)/i);
     const synopsis = synopsisM ? decodeEntities(stripTags(synopsisM[1])).trim() : '';
 
-    // Genres
     const genresM = html.match(/Genres?\s*<\/h[^>]*>([\s\S]*?)<(?:h\d|div|section)/i);
     const genres = genresM ? decodeEntities(stripTags(genresM[1])).trim() : '';
 
-    // Seasons: extract panneauAnime/panneauScan calls to list available seasons
     const seasons = [];
     const panelRe = /panneau(?:Anime|Film)\s*\(\s*["']([^"']*)["']\s*,\s*["']([^"']*)["']\s*\)/gi;
     for (const pm of matchAll(html, panelRe)) {
@@ -233,13 +226,10 @@ export class AnimeSamaSource {
   // ── Episodes list ────────────────────────────────────────
 
   async getEpisodes(animeId) {
-    // animeId = slug (e.g. "naruto")
-    // First, get anime info to find available seasons
     const info = await this.getAnimeInfo(animeId);
     const seasons = info.seasons || [];
 
     if (seasons.length === 0) {
-      // Try to guess default season
       seasons.push({ name: 'Saison 1 VOSTFR', url: 'saison1/vostfr' });
     }
 
@@ -251,16 +241,14 @@ export class AnimeSamaSource {
 
       try {
         const res = await fetch(episodesJsUrl, {
-          headers: { 'User-Agent': navigator.userAgent },
+          headers: { 'User-Agent': UA },
         });
         if (!res.ok) continue;
         const js = await res.text();
 
-        // Parse eps1 = [...] to count episodes
         const epsM = js.match(/var\s+eps1\s*=\s*\[([\s\S]*?)\];/);
         if (!epsM) continue;
 
-        // Count URLs in eps1 array
         const urlMatches = epsM[1].match(/'[^']+'/g) || epsM[1].match(/"[^"]+"/g) || [];
         const count = urlMatches.length;
 
@@ -284,26 +272,23 @@ export class AnimeSamaSource {
   // ── Video URL ────────────────────────────────────────────
 
   async getVideoUrl(episodeId) {
-    // episodeId = "slug/saison1/vostfr/3"
     const parts = episodeId.split('/');
     const epNum = parseInt(parts.pop());
     const seasonPath = parts.join('/');
 
     const episodesJsUrl = `${BASE}/catalogue/${seasonPath}/episodes.js`;
     const res = await fetch(episodesJsUrl, {
-      headers: { 'User-Agent': navigator.userAgent },
+      headers: { 'User-Agent': UA },
     });
     if (!res.ok) throw new Error('Failed to load episodes.js');
     const js = await res.text();
 
-    // Parse all epsN arrays
     const sources = [];
     const epsVarRe = /var\s+(eps\d+)\s*=\s*\[([\s\S]*?)\];/g;
     for (const m of matchAll(js, epsVarRe)) {
       const varName = m[1];
       const arrayContent = m[2];
 
-      // Extract URLs from the array
       const urls = [];
       const urlRe = /['"]([^'"]+)['"]/g;
       let um;
@@ -318,7 +303,6 @@ export class AnimeSamaSource {
       }
     }
 
-    // Filter out sibnet (dropped — CDN requires session cookies)
     const filtered = sources.filter(s => !s.url.includes('sibnet'));
     const finalSources = filtered.length > 0 ? filtered : sources;
     finalSources.sort((a, b) => this._hostPriority(a.url) - this._hostPriority(b.url));
@@ -327,7 +311,6 @@ export class AnimeSamaSource {
       throw new Error(`No video URL found for episode ${epNum}`);
     }
 
-    // Try each source in order — return the first that resolves to a direct video URL
     for (const src of finalSources) {
       const resolved = await this._resolveVideoUrl(src.url);
       if (this._isDirectUrl(resolved.url)) {
@@ -341,7 +324,6 @@ export class AnimeSamaSource {
       }
     }
 
-    // No direct URL found — fall back to best embed URL in iframe mode
     const best = finalSources[0];
     return {
       type: 'iframe',
@@ -375,16 +357,10 @@ export class AnimeSamaSource {
   }
 
   _hostPriority(url) {
-    // f16px/fmoonh: direct HLS/mp4 link extractable from page
     if (url.includes('f16px') || url.includes('fmoonh')) return 0;
-    // sendvid: direct video link when file exists
     if (url.includes('sendvid')) return 1;
-    // voe: obfuscated JS, sometimes extractable
     if (url.includes('voe')) return 2;
-    // streamtape: obfuscated token URL
     if (url.includes('streamtape')) return 3;
-
-    // vidmoly: CF Turnstile blocks fetch → iframe only
     if (url.includes('vidmoly')) return 5;
     return 10;
   }
@@ -394,22 +370,19 @@ export class AnimeSamaSource {
       const res = await fetch(embedUrl, {
         headers: {
           Referer: `${BASE}/`,
-          'User-Agent': navigator.userAgent,
+          'User-Agent': UA,
         },
         signal: AbortSignal.timeout(6000),
       });
       if (!res.ok) return { url: forceHttps(embedUrl) };
       const html = await res.text();
 
-      // m3u8 (Vidmoly, LuluStream, etc.)
       const m3u8M = /(?:file|src)\s*[:=]\s*["'](https?:\/\/[^"']*\.m3u8[^"']*)["']/i.exec(html);
       if (m3u8M) return { url: forceHttps(m3u8M[1]) };
 
-      // Voe: look for mp4/m3u8 in script
       const voeM = /(?:source|video_link)\s*[:=]\s*["'](https?:\/\/[^"']*(?:\.mp4|\.m3u8)[^"']*)["']/i.exec(html);
       if (voeM) return { url: forceHttps(voeM[1]) };
 
-      // Generic: any direct video URL
       const genericM = /["'](https?:\/\/[^"']*\.(?:mp4|m3u8|webm)[^"']*)["']/i.exec(html);
       if (genericM) return { url: forceHttps(genericM[1]) };
 
@@ -419,9 +392,9 @@ export class AnimeSamaSource {
     }
   }
 
-  // ── Cover enrichment (anime-sama covers are on GitHub, no enrichment needed)
+  // ── Cover enrichment (covers on GitHub, no enrichment needed)
 
   async enrichCoversAsync(_items, _callback) {
-    // Anime-sama covers are directly available from GitHub, no async enrichment needed
+    // Anime-sama covers are directly available from GitHub
   }
 }

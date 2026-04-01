@@ -115,20 +115,24 @@ export default function VideoPlayer({
     startNextExtraction();
   }
 
-  // Listen for the extracted URL from the content script inside the hidden iframe
+  // Listen for the extracted URL from the content script.
+  // Active for both the hidden iframe (extractUrl) and visible iframe (visibleIframeUrl),
+  // so that a URL received after a timeout (e.g. Vidmoly CF Turnstile passed by user)
+  // still switches us back to the native player.
   useEffect(() => {
-    if (!extractUrl) return;
+    if (!extractUrl && !visibleIframeUrl) return;
     function onMessage(e) {
       if (e.data?.type !== 'ANIME_EXT_VIDEO_URL') return;
       const url = e.data.url;
       if (!url) return;
       clearTimeout(extractTimerRef.current);
+      setVisibleIframeUrl(null); // leave visible iframe → native player takes over
       setExtractedUrl(url);
       setExtractUrl(null);
     }
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [extractUrl]);
+  }, [extractUrl, visibleIframeUrl]);
 
   // Setup HLS or native video (only for direct video URLs)
   useEffect(() => {
@@ -383,7 +387,8 @@ export default function VideoPlayer({
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   // ── Visible iframe: extraction timed out, or all sources exhausted ──
-  if (visibleIframeUrl) {
+  // Skip if extractedUrl just arrived (listener cleared visibleIframeUrl, but render may lag)
+  if (visibleIframeUrl && !extractedUrl) {
     return (
       <div ref={containerRef} className="relative w-full h-full bg-black">
         {!iframeLoaded && (

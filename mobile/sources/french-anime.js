@@ -1,7 +1,10 @@
-// ── French-anime.com source ──────────────────────────────────
-// Scrapes french-anime.com from the user's browser via the extension.
+// ── French-anime.com source — Mobile (React Native) version ──
+// Adapted from extension/sources/french-anime.js
+// Change: navigator.userAgent → hardcoded UA string
 
 const BASE = 'https://french-anime.com';
+
+const UA = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36';
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -32,9 +35,6 @@ function decodeEntities(str) {
     .replace(/&apos;/g, "'");
 }
 
-/**
- * Extract slug from URL like /exclue/1862-one-punch-man.html → exclue/1862-one-punch-man
- */
 function idFromUrl(url) {
   const m = url.match(/french-anime\.com\/([^?#]+)\.html/);
   return m ? m[1] : '';
@@ -44,10 +44,9 @@ function idFromUrl(url) {
 
 export class FrenchAnimeSource {
 
-  // ── Parse a .mov card (used on homepage and search) ──────
+  // ── Parse a .mov card ────────────────────────────────────
 
   _parseMovCard(cardHtml) {
-    // Link and title: <a class="mov-t nowrap" href="...">Title</a>
     const linkM = cardHtml.match(/<a[^>]*class="mov-t[^"]*"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/i);
     if (!linkM) return null;
 
@@ -56,21 +55,17 @@ export class FrenchAnimeSource {
     const id = idFromUrl(href);
     if (!id) return null;
 
-    // Cover: <img src="..." alt="..." />
     const imgM = cardHtml.match(/<img[^>]*src="([^"]*)"[^>]*/i);
     const coverPath = imgM ? imgM[1] : '';
     const cover = coverPath.startsWith('http') ? coverPath : `${BASE}${coverPath}`;
 
-    // Episode count: <div class="mov-m">12</div>
     const epM = cardHtml.match(/<div[^>]*class="mov-m"[^>]*>([\s\S]*?)<\/div>/i);
     const epText = epM ? stripTags(epM[1]).trim() : '';
     const epNum = parseInt(epText) || null;
 
-    // Season/language: <span class="block-sai">Saison 01 VOSTFR</span>
     const saiM = cardHtml.match(/<span[^>]*class="block-sai"[^>]*>([\s\S]*?)<\/span>/i);
     const saiText = saiM ? stripTags(saiM[1]).replace(/\s+/g, ' ').trim() : '';
 
-    // Year: from movie-lines "Date de sortie"
     const yearM = cardHtml.match(/Date de sortie:<\/div>\s*<div[^>]*class="ml-desc"[^>]*>\s*(\d{4})/i);
     const year = yearM ? parseInt(yearM[1]) : null;
 
@@ -95,7 +90,7 @@ export class FrenchAnimeSource {
       : `${BASE}/`;
 
     const res = await fetch(url, {
-      headers: { 'User-Agent': navigator.userAgent },
+      headers: { 'User-Agent': UA },
     });
     if (!res.ok) return [];
     const html = await res.text();
@@ -107,7 +102,6 @@ export class FrenchAnimeSource {
     const results = [];
     const seen = new Set();
 
-    // Split on card opening tags — avoids broken nested-div regex
     const parts = html.split('<div class="mov clearfix">');
     for (let i = 1; i < parts.length; i++) {
       const chunk = '<div class="mov clearfix">' + parts[i];
@@ -124,7 +118,7 @@ export class FrenchAnimeSource {
 
   async getLatestEpisodes() {
     const res = await fetch(`${BASE}/`, {
-      headers: { 'User-Agent': navigator.userAgent },
+      headers: { 'User-Agent': UA },
     });
     if (!res.ok) return [];
     const html = await res.text();
@@ -132,7 +126,7 @@ export class FrenchAnimeSource {
     return this._parseMovCards(html);
   }
 
-  // ── Season anime (catalogue) ─────────────────────────────
+  // ── Season anime ─────────────────────────────────────────
 
   async getSeasonAnime() {
     return this.search('');
@@ -142,33 +136,27 @@ export class FrenchAnimeSource {
 
   async getAnimeInfo(animeId) {
     const res = await fetch(`${BASE}/${animeId}.html`, {
-      headers: { 'User-Agent': navigator.userAgent },
+      headers: { 'User-Agent': UA },
     });
     if (!res.ok) throw new Error(`Anime not found: ${animeId}`);
     const html = await res.text();
 
-    // Title: <h1 itemprop="name">Title</h1>
     const titleM = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
     const title = titleM ? decodeEntities(stripTags(titleM[1])).trim() : animeId;
 
-    // Cover: <img id="posterimg" src="...">
     const coverM = html.match(/<img[^>]*id="posterimg"[^>]*src="([^"]*)"[^>]*/i);
     const coverPath = coverM ? coverM[1] : '';
     const cover = coverPath.startsWith('http') ? coverPath : `${BASE}${coverPath}`;
 
-    // Year
     const yearM = html.match(/Date de sortie:<\/div>\s*<div[^>]*class="mov-desc"[^>]*>\s*(\d{4})/i);
     const year = yearM ? parseInt(yearM[1]) : null;
 
-    // Synopsis
     const synM = html.match(/Synopsis:<\/div>\s*<div[^>]*class="mov-desc"[^>]*>([\s\S]*?)<\/div>/i);
     const synopsis = synM ? decodeEntities(stripTags(synM[1])).trim() : '';
 
-    // Genres
     const genreM = html.match(/GENRE:<\/div>\s*<div[^>]*class="mov-desc"[^>]*>([\s\S]*?)<\/div>/i);
     const genres = genreM ? decodeEntities(stripTags(genreM[1])).trim() : '';
 
-    // Version (VF/VOSTFR)
     const versionM = html.match(/Version:<\/div>\s*<div[^>]*class="mov-desc"[^>]*>([\s\S]*?)<\/div>/i);
     const version = versionM ? stripTags(versionM[1]).trim() : '';
 
@@ -189,13 +177,11 @@ export class FrenchAnimeSource {
 
   async getEpisodes(animeId) {
     const res = await fetch(`${BASE}/${animeId}.html`, {
-      headers: { 'User-Agent': navigator.userAgent },
+      headers: { 'User-Agent': UA },
     });
     if (!res.ok) throw new Error(`Failed to load anime page: ${animeId}`);
     const html = await res.text();
 
-    // Episodes are in <div class="eps" style="display: none">
-    // Format: 1!url1,url2,url3\n2!url1,url2\n...
     const epsM = html.match(/<div[^>]*class="eps"[^>]*>([\s\S]*?)<\/div>/i);
     if (!epsM) return [];
 
@@ -222,12 +208,11 @@ export class FrenchAnimeSource {
   // ── Video URL ────────────────────────────────────────────
 
   async getVideoUrl(episodeId) {
-    // episodeId = "exclue/1862-one-punch-man#3"
     const [animeId, epStr] = episodeId.split('#');
     const epNum = parseInt(epStr);
 
     const res = await fetch(`${BASE}/${animeId}.html`, {
-      headers: { 'User-Agent': navigator.userAgent },
+      headers: { 'User-Agent': UA },
     });
     if (!res.ok) throw new Error('Failed to load anime page');
     const html = await res.text();
@@ -238,7 +223,6 @@ export class FrenchAnimeSource {
     const epsText = epsM[1].trim();
     const lines = epsText.split('\n').filter((l) => l.trim());
 
-    // Find the line for this episode
     let urls = [];
     for (const line of lines) {
       const parts = line.split('!');
@@ -258,18 +242,16 @@ export class FrenchAnimeSource {
       .map((url) => ({ name: this._getHostName(url), url: forceHttps(url) }));
     const sources = allSources.length > 0 ? allSources : urls.map(url => ({ name: this._getHostName(url), url: forceHttps(url) }));
 
-    // Sort by host priority
     sources.sort((a, b) => this._hostPriority(a.url) - this._hostPriority(b.url));
 
     const referer = `${BASE}/${animeId}.html`;
 
-    // Try each source in order — return the first that resolves to a direct video URL
     for (const src of sources) {
       const resolved = await this._resolveVideoUrl(src.url);
       if (this._isDirectUrl(resolved.url)) {
         return {
           url: resolved.url,
-          sourceUrl: src.url, // embed URL that produced the direct URL (for source cycling)
+          sourceUrl: src.url,
           referer,
           headers: { Referer: referer },
           subtitles: [],
@@ -278,7 +260,6 @@ export class FrenchAnimeSource {
       }
     }
 
-    // No direct URL found — fall back to best embed URL in iframe mode
     const best = sources[0];
     return {
       type: 'iframe',
@@ -314,15 +295,10 @@ export class FrenchAnimeSource {
   }
 
   _hostPriority(url) {
-    // luluvid/lulustream: direct m3u8 in JWPlayer setup, no JS challenge
     if (url.includes('luluvid') || url.includes('lulustream')) return 0;
-    // sendvid: direct video fallback
     if (url.includes('sendvid')) return 1;
-    // vidmoly: redirects to .biz which has CF Turnstile → fetch blocked
     if (url.includes('vidmoly')) return 2;
-    // voe variants: obfuscated JS, no static URL
     if (url.includes('voe') || url.includes('dianaavoidthey')) return 4;
-    // savefiles: form POST + files expire quickly
     if (url.includes('savefiles')) return 5;
     if (url.includes('up4fun')) return 6;
     if (url.includes('streamtape')) return 7;
@@ -334,22 +310,19 @@ export class FrenchAnimeSource {
       const res = await fetch(embedUrl, {
         headers: {
           Referer: `${BASE}/`,
-          'User-Agent': navigator.userAgent,
+          'User-Agent': UA,
         },
         signal: AbortSignal.timeout(6000),
       });
       if (!res.ok) return { url: embedUrl };
       const html = await res.text();
 
-      // Vidmoly: look for m3u8
       const m3u8M = html.match(/(?:file|src)\s*[:=]\s*["'](https?:\/\/[^"']*\.m3u8[^"']*)["']/i);
       if (m3u8M) return { url: forceHttps(m3u8M[1]) };
 
-      // Voe: look for mp4/m3u8
       const voeM = html.match(/(?:source|video_link)\s*[:=]\s*["'](https?:\/\/[^"']*(?:\.mp4|\.m3u8)[^"']*)["']/i);
       if (voeM) return { url: forceHttps(voeM[1]) };
 
-      // Generic video URL
       const genericM = html.match(/["'](https?:\/\/[^"']*\.(?:mp4|m3u8|webm)[^"']*)["']/i);
       if (genericM) return { url: forceHttps(genericM[1]) };
 
@@ -359,7 +332,7 @@ export class FrenchAnimeSource {
     }
   }
 
-  // ── Cover enrichment (not needed, covers are on the same domain)
+  // ── Cover enrichment (covers on same domain, no enrichment needed)
 
   async enrichCoversAsync(_items, _callback) {
     // french-anime.com covers are direct relative URLs, no enrichment needed

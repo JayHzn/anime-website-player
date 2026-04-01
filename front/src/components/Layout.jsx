@@ -1,7 +1,7 @@
 import { Outlet, Link, useNavigate } from 'react-router-dom';
-import { Search, Play, Home, Clock, X, Puzzle } from 'lucide-react';
+import { Search, Play, Home, Clock, X, Puzzle, Globe } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { isExtensionAvailable, getSelectedSource, isExtensionOutdated, resetExtensionCache } from '../api';
+import { isExtensionAvailable, getSelectedSource, isExtensionOutdated, resetExtensionCache, isMobileApp } from '../api';
 
 export default function Layout() {
   const [query, setQuery] = useState('');
@@ -11,6 +11,7 @@ export default function Layout() {
   const [extMissing, setExtMissing] = useState(false);
   const [extOutdated, setExtOutdated] = useState(false);
   const [bannerDismissed, setBannerDismissed] = useState(false);
+  const [mobile, setMobile] = useState(false);
 
   function checkExtension() {
     isExtensionAvailable().then((ok) => {
@@ -18,6 +19,7 @@ export default function Layout() {
       if (ok) {
         setSelectedSource(getSelectedSource());
         setExtOutdated(isExtensionOutdated());
+        setMobile(isMobileApp());
       }
     });
   }
@@ -99,6 +101,15 @@ export default function Layout() {
             >
               <Clock className="w-5 h-5" />
             </Link>
+            {mobile && (
+              <Link
+                to="/sources"
+                className="p-2.5 rounded-lg text-white/50 hover:text-white hover:bg-bg-hover transition-all"
+                title="Sources"
+              >
+                <Globe className="w-5 h-5" />
+              </Link>
+            )}
           </div>
         </div>
       </nav>
@@ -123,7 +134,7 @@ export default function Layout() {
 
       {/* Content */}
       <main className={extMissing && !bannerDismissed ? 'pt-[104px]' : 'pt-16'}>
-        <Outlet context={{ selectedSource, extMissing, extOutdated }} />
+        <Outlet context={{ selectedSource, extMissing, extOutdated, mobile }} />
       </main>
     </div>
   );

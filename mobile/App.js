@@ -1,17 +1,32 @@
 import { registerRootComponent } from "expo";
-import React, { useRef, useCallback } from "react";
+import React, { useRef, useCallback, useEffect, useState } from "react";
 import { SafeAreaView, StatusBar, StyleSheet, BackHandler } from "react-native";
 import { WebView } from "react-native-webview";
 import * as ScreenOrientation from "expo-screen-orientation";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { BRIDGE_SCRIPT } from "./bridge";
 import { VoiranimeSource } from "./sources/voiranime";
 import { VoirdramaSource } from "./sources/voirdrama";
+import { AnimeSamaSource } from "./sources/anime-sama";
+import { FrenchAnimeSource } from "./sources/french-anime";
 
-// ── Sources (same as extension/background.js) ───────────────
+// ── Sources ──────────────────────────────────────────────────
 const sources = {
   voiranime: new VoiranimeSource(),
   voirdrama: new VoirdramaSource(),
+  "anime-sama": new AnimeSamaSource(),
+  "french-anime": new FrenchAnimeSource(),
 };
+
+// ── Source metadata (for the in-app source browser) ──────────
+const SOURCE_META = [
+  { id: "anime-sama",   name: "Anime-Sama",   initials: "AS", color: "indigo",  url: "anime-sama.to",    lang: "fr" },
+  { id: "french-anime", name: "French Anime",  initials: "FA", color: "pink",    url: "french-anime.com", lang: "fr" },
+  { id: "voiranime",    name: "VoirAnime",     initials: "VA", color: "blue",    url: "voiranime.com",    lang: "fr" },
+  { id: "voirdrama",    name: "VoirDrama",     initials: "VD", color: "purple",  url: "voirdrama.com",    lang: "fr" },
+];
+
+const SELECTED_SOURCE_KEY = "animehub_selected_source";
 
 // ── Search cache (same as extension/background.js) ──────────
 const searchCache = new Map();
@@ -62,6 +77,14 @@ const SITE_URL = "https://anime-website-player.onrender.com";
 
 export default function App() {
   const webViewRef = useRef(null);
+  const [selectedSource, setSelectedSource] = useState(null);
+
+  // Load persisted source on mount
+  useEffect(() => {
+    AsyncStorage.getItem(SELECTED_SOURCE_KEY).then((v) => {
+      if (v && sources[v]) setSelectedSource(v);
+    });
+  }, []);
 
   // Send a message to the WebView (site)
   const sendToWebView = useCallback((data) => {
@@ -85,10 +108,29 @@ export default function App() {
   const handleAction = useCallback(
     async (action, payload) => {
       if (action === "ping") {
-        return { version: "1.0.0-mobile", sources: Object.keys(sources) };
+        return {
+          version: "1.0.0-mobile",
+          sources: Object.keys(sources),
+          selectedSource,
+          sourceMeta: SOURCE_META,
+        };
       }
 
-      const sourceName = payload?.source || "voiranime";
+      if (action === "selectSource") {
+        const newSource = payload?.source || null;
+        if (newSource && !sources[newSource]) {
+          throw new Error(`Source inconnue: ${newSource}`);
+        }
+        setSelectedSource(newSource);
+        if (newSource) {
+          await AsyncStorage.setItem(SELECTED_SOURCE_KEY, newSource);
+        } else {
+          await AsyncStorage.removeItem(SELECTED_SOURCE_KEY);
+        }
+        return { selectedSource: newSource };
+      }
+
+      const sourceName = payload?.source || selectedSource || "anime-sama";
       const source = sources[sourceName];
       if (!source) throw new Error(`Source inconnue: ${sourceName}`);
 
@@ -159,7 +201,7 @@ export default function App() {
           throw new Error(`Action inconnue: ${action}`);
       }
     },
-    [sendCoversUpdate]
+    [sendCoversUpdate, selectedSource]
   );
 
   // ── WebView message handler ───────────────────────────────
