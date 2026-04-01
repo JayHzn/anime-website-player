@@ -196,7 +196,7 @@ export class FrenchAnimeSource {
       if (isNaN(epNum)) continue;
 
       episodes.push({
-        id: `${animeId}#${epNum}`,
+        id: `${animeId}/${epNum}`,
         number: epNum,
         title: `Episode ${epNum}`,
       });
@@ -208,8 +208,9 @@ export class FrenchAnimeSource {
   // ── Video URL ────────────────────────────────────────────
 
   async getVideoUrl(episodeId) {
-    const [animeId, epStr] = episodeId.split('#');
-    const epNum = parseInt(epStr);
+    const lastSlash = episodeId.lastIndexOf('/');
+    const animeId = episodeId.slice(0, lastSlash);
+    const epNum = parseInt(episodeId.slice(lastSlash + 1));
 
     const res = await fetch(`${BASE}/${animeId}.html`, {
       headers: { 'User-Agent': UA },

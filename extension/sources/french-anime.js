@@ -210,7 +210,7 @@ export class FrenchAnimeSource {
       if (isNaN(epNum)) continue;
 
       episodes.push({
-        id: `${animeId}#${epNum}`,
+        id: `${animeId}/${epNum}`,
         number: epNum,
         title: `Episode ${epNum}`,
       });
@@ -222,9 +222,10 @@ export class FrenchAnimeSource {
   // ── Video URL ────────────────────────────────────────────
 
   async getVideoUrl(episodeId) {
-    // episodeId = "exclue/1862-one-punch-man#3"
-    const [animeId, epStr] = episodeId.split('#');
-    const epNum = parseInt(epStr);
+    // episodeId = "exclue/1862-one-punch-man/3"  (last segment is episode number)
+    const lastSlash = episodeId.lastIndexOf('/');
+    const animeId = episodeId.slice(0, lastSlash);
+    const epNum = parseInt(episodeId.slice(lastSlash + 1));
 
     const res = await fetch(`${BASE}/${animeId}.html`, {
       headers: { 'User-Agent': navigator.userAgent },
