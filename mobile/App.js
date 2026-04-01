@@ -307,6 +307,7 @@ export default function App() {
         source={{ uri: SITE_URL }}
         style={styles.webview}
         injectedJavaScript={BRIDGE_SCRIPT}
+        injectedJavaScriptForMainFrameOnly={false}
         onMessage={onMessage}
         onNavigationStateChange={onNavigationStateChange}
         onShouldStartLoadWithRequest={handleNavigationRequest}

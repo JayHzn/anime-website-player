@@ -6,9 +6,124 @@
  * Mobile:    window.postMessage ↔ window.ReactNativeWebView.postMessage
  */
 
+// ── Video URL extractor — runs inside third-party embed iframes ──
+// Mirrors extension/player-extractor.js but for React Native WebView.
+// No isolated-world issue here (injected JS already runs in page context),
+// so no <script> tag injection needed.
+// Detected URL is sent to the parent frame which relays it to VideoPlayer.jsx.
+const IFRAME_EXTRACTOR_SCRIPT = `
+(function() {
+  if (window.__ANIMEHUB_EXTRACTOR__) return;
+  window.__ANIMEHUB_EXTRACTOR__ = true;
+
+  var _sent = false;
+  function send(url) {
+    if (_sent || !url) return;
+    // Resolve relative / protocol-relative URLs
+    if (url.startsWith('/') && !url.startsWith('//')) url = location.origin + url;
+    else if (url.startsWith('//')) url = location.protocol + url;
+    // Only relay direct video file URLs
+    if (!/\\.(m3u8|mp4|webm)(\\?|$)/i.test(url)) return;
+    _sent = true;
+    // Post to parent frame — VideoPlayer.jsx listens for this
+    window.parent.postMessage({ type: 'ANIME_EXT_VIDEO_URL', url: url }, '*');
+  }
+
+  // ── XHR interception ──────────────────────────────────────
+  var origOpen = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function(method, url) {
+    if (typeof url === 'string') send(url);
+    return origOpen.apply(this, arguments);
+  };
+
+  // ── Fetch interception ────────────────────────────────────
+  var origFetch = window.fetch;
+  window.fetch = function(resource) {
+    var url = typeof resource === 'string' ? resource : (resource && resource.url);
+    if (url) send(url);
+    return origFetch.apply(this, arguments);
+  };
+
+  // ── JWPlayer static config ────────────────────────────────
+  function tryJWPlayer() {
+    if (typeof jwplayer === 'undefined') return false;
+    try {
+      var p = jwplayer();
+      if (!p || typeof p.getPlaylist !== 'function') return false;
+      var playlist = p.getPlaylist();
+      if (!playlist || !playlist[0]) return false;
+      var sources = playlist[0].sources || [];
+      var m3u8 = sources.find(function(s) { return s.file && /\\.m3u8/.test(s.file); });
+      var mp4  = sources.find(function(s) { return s.file && /\\.mp4/.test(s.file); });
+      var url  = (m3u8 || mp4 || sources[0] || {}).file;
+      if (url) { send(url); return true; }
+    } catch(e) {}
+    return false;
+  }
+
+  // ── VideoJS static config ─────────────────────────────────
+  function tryVideoJS() {
+    if (typeof videojs === 'undefined') return false;
+    try {
+      var players = Object.values(videojs.getPlayers() || {});
+      for (var i = 0; i < players.length; i++) {
+        var p = players[i];
+        if (!p) continue;
+        var src = p.currentSrc && p.currentSrc();
+        if (src && !/^blob:/.test(src)) { send(src); return true; }
+        var srcs = p.currentSources && p.currentSources();
+        if (srcs && srcs[0] && srcs[0].src) { send(srcs[0].src); return true; }
+      }
+    } catch(e) {}
+    return false;
+  }
+
+  // ── Video element src property ────────────────────────────
+  function tryVideoElement() {
+    var video = document.querySelector('video');
+    if (video) {
+      var src = video.currentSrc || video.src;
+      if (src && !/^blob:/.test(src)) { send(src); return true; }
+    }
+    var source = document.querySelector('video source[src]');
+    if (source && source.src) { send(source.src); return true; }
+    return false;
+  }
+
+  function tryStatic() {
+    return tryJWPlayer() || tryVideoJS() || tryVideoElement();
+  }
+
+  // ── Force video.load() for preload:none players ───────────
+  function forceLoadAndListen() {
+    var video = document.querySelector('video');
+    if (!video) return;
+    video.muted = true;
+    video.addEventListener('loadstart', function() {
+      var src = video.currentSrc || video.src;
+      if (src && !/^blob:/.test(src)) send(src);
+    }, { once: true });
+    try { video.load(); } catch(e) {}
+  }
+
+  if (!tryStatic()) {
+    forceLoadAndListen();
+    setTimeout(function() { if (!tryStatic()) setTimeout(tryStatic, 3000); }, 1500);
+  }
+})();
+`;
+
 export const BRIDGE_SCRIPT = `
 (function() {
-  // Prevent double-injection
+  // Branch: main frame runs the bridge, iframes run the video extractor
+  var isMainFrame = window === window.top;
+
+  if (!isMainFrame) {
+    ${IFRAME_EXTRACTOR_SCRIPT.trim()}
+    return;
+  }
+
+  // Prevent double-injection on the main frame
   if (window.__ANIMEHUB_BRIDGE__) return;
   window.__ANIMEHUB_BRIDGE__ = true;
   window.__ANIMEHUB_MOBILE__ = true;
