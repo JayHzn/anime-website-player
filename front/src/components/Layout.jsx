@@ -38,6 +38,10 @@ export default function Layout() {
     return () => window.removeEventListener('message', onExtReady);
   }, []);
 
+  let searchPlaceholder = "Sélectionnez une source dans l'extension...";
+  if (selectedSource) searchPlaceholder = "Rechercher un anime...";
+  else if (mobile) searchPlaceholder = "Sélectionnez une source...";
+
   const handleSearch = (e) => {
     e.preventDefault();
     if (query.trim()) {
@@ -78,7 +82,7 @@ export default function Layout() {
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder={selectedSource ? "Rechercher un anime..." : "Sélectionnez une source dans l'extension..."}
+                placeholder={searchPlaceholder}
                 disabled={!selectedSource}
                 className="w-full bg-bg-secondary border border-white/5 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:border-accent-primary/50 focus:ring-1 focus:ring-accent-primary/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
               />
@@ -115,7 +119,7 @@ export default function Layout() {
       </nav>
 
       {/* Extension missing banner */}
-      {extMissing && !bannerDismissed && (
+      {extMissing && !mobile && !bannerDismissed && (
         <div className="fixed top-16 left-0 right-0 z-40 bg-amber-500/10 border-b border-amber-500/20 backdrop-blur-sm">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2.5 flex items-center gap-3">
             <Puzzle className="w-4 h-4 text-amber-400 shrink-0" />

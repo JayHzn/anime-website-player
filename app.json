@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "3ead36a0-020e-4906-a1ad-2a1c51921322"
+      }
+    },
+    "android": {
+      "package": "com.jayhzn.animewebsiteplayer"
+    }
+  }
+}

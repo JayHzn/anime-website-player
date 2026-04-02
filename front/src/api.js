@@ -90,6 +90,7 @@ function semverGte(a, b) {
 /** Returns true when the detected extension is older than MIN_EXTENSION_VERSION. */
 export function isExtensionOutdated() {
   if (!_extVersion) return false;
+  if (_sourceMeta !== null) return false; // mobile app: no version check
   return !semverGte(_extVersion, MIN_EXTENSION_VERSION);
 }
 

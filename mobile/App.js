@@ -9,6 +9,7 @@ import { VoiranimeSource } from "./sources/voiranime";
 import { VoirdramaSource } from "./sources/voirdrama";
 import { AnimeSamaSource } from "./sources/anime-sama";
 import { FrenchAnimeSource } from "./sources/french-anime";
+import { VostfreeSource } from "./sources/vostfree";
 
 // ── Sources ──────────────────────────────────────────────────
 const sources = {
@@ -16,12 +17,14 @@ const sources = {
   voirdrama: new VoirdramaSource(),
   "anime-sama": new AnimeSamaSource(),
   "french-anime": new FrenchAnimeSource(),
+  "vostfree": new VostfreeSource(),
 };
 
 // ── Source metadata (for the in-app source browser) ──────────
 const SOURCE_META = [
   { id: "anime-sama",   name: "Anime-Sama",   initials: "AS", color: "indigo",  url: "anime-sama.to",    lang: "fr" },
   { id: "french-anime", name: "French Anime",  initials: "FA", color: "pink",    url: "french-anime.com", lang: "fr" },
+  { id: "vostfree",     name: "Vostfree",      initials: "VF", color: "orange",  url: "vostfree.ws",      lang: "fr" },
   { id: "voiranime",    name: "VoirAnime",     initials: "VA", color: "blue",    url: "voiranime.com",    lang: "fr" },
   { id: "voirdrama",    name: "VoirDrama",     initials: "VD", color: "purple",  url: "voirdrama.com",    lang: "fr" },
 ];
