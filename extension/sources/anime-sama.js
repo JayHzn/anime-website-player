@@ -333,8 +333,9 @@ export class AnimeSamaSource {
       if (this._isDirectUrl(resolved.url)) {
         return {
           url: resolved.url,
-          referer: src.url,
-          headers: { Referer: src.url },
+          sourceUrl: src.url,
+          referer: `${BASE}/`,
+          headers: { Referer: `${BASE}/` },
           subtitles: [],
           sources: finalSources,
         };
@@ -346,8 +347,8 @@ export class AnimeSamaSource {
     return {
       type: 'iframe',
       url: forceHttps(best.url),
-      referer: best.url,
-      headers: { Referer: best.url },
+      referer: `${BASE}/`,
+      headers: { Referer: `${BASE}/` },
       subtitles: [],
       sources: finalSources,
     };

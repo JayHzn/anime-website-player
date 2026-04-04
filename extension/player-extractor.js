@@ -13,13 +13,20 @@
 
   let _sent = false;
 
+  function isVideoUrl(url) {
+    if (!url || typeof url !== 'string') return false;
+    if (/\.(m3u8|mp4|webm|ts)(\?|$)/i.test(url)) return true;
+    if (/\/hls\//i.test(url)) return true;
+    if (/[?&](type=hls|format=hls|manifest=m3u8)/i.test(url)) return true;
+    if (/\/(manifest|playlist|index)(\.m3u8)?(\?|$)/i.test(url)) return true;
+    return false;
+  }
+
   function send(url) {
-    if (_sent || !url) return;
-    // Resolve relative / protocol-relative URLs
+    if (_sent || !url || typeof url !== 'string') return;
     if (url.startsWith('/') && !url.startsWith('//')) url = location.origin + url;
     else if (url.startsWith('//')) url = location.protocol + url;
-    // Only relay direct video file URLs
-    if (!/\.(m3u8|mp4|webm)(\?|$)/i.test(url)) return;
+    if (!isVideoUrl(url)) return;
     _sent = true;
     parent.postMessage({ type: 'ANIME_EXT_VIDEO_URL', url }, '*'); // NOSONAR(javascript:S2819)
   }
@@ -39,21 +46,55 @@
     return origFetch.apply(this, arguments);
   };
 
-  // ── Strategy 3: JWPlayer static config ───────────────────
-  function tryJWPlayer() {
-    if (typeof jwplayer === 'undefined') return false;
-    try {
-      const p = jwplayer();
-      if (!p || typeof p.getPlaylist !== 'function') return false;
-      const playlist = p.getPlaylist();
-      if (!playlist?.[0]) return false;
-      const sources = playlist[0].sources || [];
-      const m3u8 = sources.find(s => s.file && /\.m3u8/.test(s.file));
-      const mp4  = sources.find(s => s.file && /\.mp4/.test(s.file));
-      const url  = (m3u8 || mp4 || sources[0] || {}).file;
-      if (url) { send(url); return true; }
-    } catch (e) { console.debug('[anime-ext] JWPlayer error', e); }
-    return false;
+  // ── Strategy 3: JWPlayer setup hook ──────────────────────
+  // Extracts playlist URL from the jwplayer config at call time —
+  // more reliable than XHR interception (fires before HLS requests).
+
+  function extractFromConfig(config) {
+    if (!config) return;
+    if (config.file) send(config.file);
+    const rawPlaylist = config.playlist;
+    let playlist;
+    if (Array.isArray(rawPlaylist)) playlist = rawPlaylist;
+    else if (rawPlaylist) playlist = [rawPlaylist];
+    else playlist = [];
+    for (const item of playlist) {
+      if (item?.file) send(item.file);
+      for (const src of (item?.sources || [])) {
+        if (src?.file) send(src.file);
+      }
+    }
+  }
+
+  function hookJWSetup(jw) {
+    if (jw && typeof jw === 'function') {
+      const origJW = jw;
+      globalThis.jwplayer = function (...args) {
+        const inst = origJW.apply(this, args);
+        if (inst && typeof inst.setup === 'function') {
+          const origSetup = inst.setup.bind(inst);
+          inst.setup = function (config) {
+            try { extractFromConfig(config); } catch (e) { console.debug('[anime-ext] extractFromConfig error', e); }
+            return origSetup(config);
+          };
+        }
+        return inst;
+      };
+      Object.assign(globalThis.jwplayer, origJW);
+    }
+  }
+
+  if (typeof jwplayer === 'undefined') {
+    Object.defineProperty(globalThis, 'jwplayer', {
+      configurable: true,
+      set(value) {
+        Object.defineProperty(globalThis, 'jwplayer', { configurable: true, writable: true, value });
+        hookJWSetup(value);
+      },
+      get() { return undefined; },
+    });
+  } else {
+    hookJWSetup(jwplayer);
   }
 
   // ── Strategy 4: VideoJS static config ────────────────────
@@ -84,11 +125,27 @@
     return false;
   }
 
+  // ── Strategy 6: JWPlayer getPlaylist (after setup) ───────
+  function tryJWPlayer() {
+    try {
+      const jw = globalThis.jwplayer?.();
+      if (!jw || typeof jw.getPlaylist !== 'function') return false;
+      const playlist = jw.getPlaylist();
+      if (!playlist?.[0]) return false;
+      const sources = playlist[0].sources || [];
+      const m3u8 = sources.find(s => s.file && /\.m3u8/i.test(s.file));
+      const mp4  = sources.find(s => s.file && /\.mp4/i.test(s.file));
+      const url  = (m3u8 ?? mp4 ?? sources[0])?.file;
+      if (url) { send(url); return true; }
+    } catch (e) { console.debug('[anime-ext] JWPlayer error', e); }
+    return false;
+  }
+
   function tryStatic() {
     return tryJWPlayer() || tryVideoJS() || tryVideoElement();
   }
 
-  // ── Strategy 6: force video.load() for preload:none ──────
+  // ── Strategy 7: force video.load() for preload:none ──────
   function forceLoadAndListen() {
     const video = document.querySelector('video');
     if (!video) return;
@@ -100,8 +157,7 @@
     try { video.load(); } catch (e) { console.debug('[anime-ext] video.load error', e); }
   }
 
-  if (!tryStatic()) {
-    forceLoadAndListen();
-    setTimeout(() => { if (!tryStatic()) setTimeout(tryStatic, 3000); }, 1500);
-  }
+  if (tryStatic()) return;
+  forceLoadAndListen();
+  setTimeout(() => { if (!_sent && !tryStatic()) setTimeout(tryStatic, 3000); }, 1500);
 })();

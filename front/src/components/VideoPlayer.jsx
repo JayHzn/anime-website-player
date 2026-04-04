@@ -68,13 +68,23 @@ export default function VideoPlayer({
     clearTimeout(extractTimerRef.current);
     skipDismissed.current.clear();
     // Build the embed URL queue for source cycling.
-    // For direct URLs, exclude the source that produced videoData.url (it already failed or will fail).
     const allSources = videoData?.sources?.map(s => s.url) || [];
-    // sourceUrl = embed URL that produced the direct URL (set explicitly, or falls back to referer for anime-sama)
-    const usedSourceUrl = videoData?.sourceUrl || videoData?.referer;
-    embedQueueRef.current = usedSourceUrl
-      ? allSources.filter(u => u !== usedSourceUrl)
-      : allSources;
+    if (videoData?.type === 'iframe') {
+      // Iframe mode: try ALL sources — none has been resolved yet.
+      // Exclude hosts that block iframes (X-Frame-Options: sameorigin) since
+      // player-extractor can't run inside a chrome-error:// page.
+      const NO_IFRAME_HOSTS = ['sendvid.com'];
+      embedQueueRef.current = allSources.filter(
+        u => !NO_IFRAME_HOSTS.some(h => u.includes(h))
+      );
+    } else {
+      // Direct URL mode: exclude the embed source that already resolved (sourceUrl),
+      // or fallback to referer if sourceUrl is not set explicitly.
+      const usedSourceUrl = videoData?.sourceUrl || videoData?.referer;
+      embedQueueRef.current = usedSourceUrl
+        ? allSources.filter(u => u !== usedSourceUrl)
+        : allSources;
+    }
   }, [videoData?.url]);
 
   // Start iframe extraction for all iframe-mode sources
