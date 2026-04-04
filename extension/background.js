@@ -127,6 +127,7 @@ async function handleSourceAction(action, payload, sender, sourceName, source) {
 // ── Message handler ──────────────────────────────────────────
 
 export async function handleAction(action, payload, sender) {
+  if (action === 'keepalive') return {};
   if (action === 'ping') {
     return {
       version: chrome.runtime.getManifest().version,

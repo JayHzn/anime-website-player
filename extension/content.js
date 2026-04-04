@@ -16,6 +16,13 @@ window.addEventListener("load", announceReady);
 setTimeout(announceReady, 500);
 setTimeout(announceReady, 2000);
 
+// Keep the background service worker alive (MV3 workers get killed after ~30s idle)
+setInterval(() => {
+  chrome.runtime.sendMessage({ action: 'keepalive' }, () => {
+    if (chrome.runtime.lastError) { /* suppress "port closed" warning */ }
+  });
+}, 25000);
+
 // Relay background -> page messages (cover updates)
 chrome.runtime.onMessage.addListener((message) => {
   if (message.type === "ANIME_EXT_COVERS_UPDATE") {

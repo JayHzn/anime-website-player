@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { Check, Globe, MousePointer } from 'lucide-react';
-import { api, getSourceMeta, getAvailableSources, resetExtensionCache, isExtensionAvailable } from '../api';
+import { api, getSourceMeta, getAvailableSources, isExtensionAvailable } from '../api';
 
 // Fallback metadata for desktop (where ping returns no sourceMeta)
 const DESKTOP_SOURCE_META = [
@@ -43,10 +43,8 @@ export default function SourcesPage() {
     setSwitching(sourceId);
     try {
       await api.selectSource(sourceId);
-      resetExtensionCache();
-      // Re-ping to update selected source
-      await isExtensionAvailable();
-      navigate('/');
+      // Full reload so Layout.jsx gets the updated selectedSource from a fresh bridge ping
+      window.location.href = '/';
     } catch (e) {
       console.error('[sources] selectSource failed:', e);
       setSwitching(null);

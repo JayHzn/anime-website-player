@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AnimeHub Source",
-  "version": "2.0.12",
+  "version": "2.0.13",
   "description": "Fournit les sources anime et drama pour AnimeHub",
   "permissions": ["tabs", "scripting", "storage"],
   "host_permissions": [

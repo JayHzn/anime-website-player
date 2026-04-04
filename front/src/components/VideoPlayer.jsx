@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import {
   Play, Pause, Volume2, VolumeX, Maximize, Minimize,
-  SkipForward, SkipBack, ChevronLeft, Settings,
+  SkipForward, SkipBack, ChevronLeft, Settings, RefreshCw,
 } from 'lucide-react';
 import Hls from 'hls.js';
 
@@ -41,6 +41,7 @@ export default function VideoPlayer({
   const [showSkipEditor, setShowSkipEditor] = useState(false);
   const [visibleIframeUrl, setVisibleIframeUrl] = useState(null); // iframe shown to user (fallback)
   const [iframeLoaded, setIframeLoaded] = useState(false);
+  const [sourcesExhausted, setSourcesExhausted] = useState(false); // all embed sources failed
   // Iframe URL extraction: load embed in hidden iframe, content script extracts direct URL
   const [extractUrl, setExtractUrl] = useState(null);    // URL in hidden iframe
   const [extractedUrl, setExtractedUrl] = useState(null); // extracted direct video URL
@@ -61,6 +62,7 @@ export default function VideoPlayer({
     setActiveSkip(null);
     setVisibleIframeUrl(null);
     setIframeLoaded(false);
+    setSourcesExhausted(false);
     setExtractUrl(null);
     setExtractedUrl(null);
     clearTimeout(extractTimerRef.current);
@@ -86,9 +88,9 @@ export default function VideoPlayer({
   function startNextExtraction() {
     const queue = embedQueueRef.current;
     if (queue.length === 0) {
-      // All sources exhausted — show the original iframe as last resort
-      const fallback = videoData?.sources?.[0]?.url || videoData?.url;
-      setVisibleIframeUrl(fallback || null);
+      // All sources exhausted — show error state
+      setSourcesExhausted(true);
+      setVisibleIframeUrl(null);
       setIsLoading(false);
       return;
     }
@@ -111,6 +113,9 @@ export default function VideoPlayer({
     clearTimeout(extractTimerRef.current);
     setExtractedUrl(null);
     setExtractUrl(null);
+    setVisibleIframeUrl(null);
+    setIframeLoaded(false);
+    setSourcesExhausted(false);
     setIsLoading(false);
     startNextExtraction();
   }
@@ -386,7 +391,29 @@ export default function VideoPlayer({
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
-  // ── Visible iframe: extraction timed out, or all sources exhausted ──
+  // ── All embed sources exhausted and none worked ──
+  if (sourcesExhausted && !extractedUrl) {
+    return (
+      <div ref={containerRef} className="relative w-full h-full bg-black flex flex-col items-center justify-center gap-4 text-center px-6">
+        <div className="w-14 h-14 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center mb-2">
+          <Settings className="w-7 h-7 text-red-400" />
+        </div>
+        <p className="text-white/70 font-display font-semibold text-base">Lecteur indisponible</p>
+        <p className="text-white/30 text-sm max-w-xs">
+          Aucune source n'a pu charger cet épisode. Le lecteur est peut-être bloqué ou l'épisode temporairement indisponible.
+        </p>
+        <button
+          onClick={onBack}
+          className="mt-2 flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-white/60 text-sm hover:bg-white/10 hover:text-white transition"
+        >
+          <ChevronLeft className="w-4 h-4" />
+          Retour
+        </button>
+      </div>
+    );
+  }
+
+  // ── Visible iframe: extraction timed out ──
   // Skip if extractedUrl just arrived (listener cleared visibleIframeUrl, but render may lag)
   if (visibleIframeUrl && !extractedUrl) {
     return (
@@ -416,6 +443,14 @@ export default function VideoPlayer({
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={tryNextSource}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 transition text-xs text-white font-medium"
+              title="Essayer la source suivante"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Source suivante
+            </button>
             {onPrevious && (
               <button
                 onClick={onPrevious}
