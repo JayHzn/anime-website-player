@@ -115,7 +115,7 @@ function WelcomePage() {
           <Play className="w-10 h-10 text-white fill-white ml-1" />
         </div>
         <h1 className="font-display font-bold text-4xl mb-4 neon-text">
-          Shi<span className="text-accent-primary">nani</span>
+          <span className="text-white">Shin</span><span className="text-accent-primary">ani</span>
         </h1>
         <p className="text-white/50 text-lg max-w-lg mx-auto leading-relaxed">
           Regardez vos animes et dramas favoris en VF et VOSTFR, le tout depuis une seule interface.

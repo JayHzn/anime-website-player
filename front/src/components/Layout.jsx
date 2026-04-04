@@ -62,7 +62,7 @@ export default function Layout() {
               <Play className="w-4.5 h-4.5 text-white fill-white ml-0.5" />
             </div>
             <span className="font-display font-bold text-lg tracking-tight hidden sm:block neon-text">
-              Shi<span className="text-accent-primary">nani</span>
+              <span className="text-white">Shin</span><span className="text-accent-primary">ani</span>
             </span>
           </Link>
 
