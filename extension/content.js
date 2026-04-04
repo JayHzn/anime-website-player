@@ -1,5 +1,5 @@
 // Content script: relays messages between the web page and the extension background
-// Injected into the AnimeHub website
+// Injected into the Shinani website
 
 // Announce extension presence — repeat to ensure the site catches it
 function announceReady() {

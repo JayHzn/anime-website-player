@@ -9,8 +9,8 @@
 }
 
 body {
-    background-color: #0a0a0f;
-    color: #e8e8e8;
+    background-color: #07070f;
+    color: #e8e8f0;
     font-family: 'DM Sans', sans-serif;
     min-height: 100vh;
     -webkit-font-smoothing: antialiased;
@@ -22,16 +22,16 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-    background: #0a0a0f;
+    background: #07070f;
 }
 
 ::-webkit-scrollbar-thumb {
-    background: #333;
+    background: #a855f730;
     border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: #555;
+    background: #a855f760;
 }
 
 /* Video player custom */
@@ -115,4 +115,46 @@ body {
 /* Hide scrollbar for carousel */
 .scrollbar-hide::-webkit-scrollbar {
     display: none;
+}
+
+/* Neon glow effects */
+.neon-glow {
+    box-shadow: 0 0 12px #a855f760, 0 0 40px #a855f720;
+}
+
+.neon-text {
+    text-shadow: 0 0 10px #a855f7, 0 0 30px #a855f750;
+}
+
+/* Cyberpunk grid background */
+body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+        linear-gradient(rgba(168, 85, 247, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(168, 85, 247, 0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* Subtle radial purple ambient */
+body::after {
+    content: '';
+    position: fixed;
+    top: -20%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 80vw;
+    height: 60vh;
+    background: radial-gradient(ellipse at center, rgba(168, 85, 247, 0.07) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* Ensure content sits above bg effects */
+#root {
+    position: relative;
+    z-index: 1;
 }

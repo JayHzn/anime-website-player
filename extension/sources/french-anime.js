@@ -90,17 +90,29 @@ export class FrenchAnimeSource {
   // ── Search ───────────────────────────────────────────────
 
   async search(query) {
-    const url = query?.trim()
-      ? `${BASE}/?s=${encodeURIComponent(query)}`
-      : `${BASE}/`;
+    if (!query?.trim()) {
+      // Empty query → homepage catalogue
+      const res = await fetch(`${BASE}/`, { headers: { 'User-Agent': navigator.userAgent } });
+      if (!res.ok) return [];
+      return this._parseMovCards(await res.text());
+    }
 
-    const res = await fetch(url, {
-      headers: { 'User-Agent': navigator.userAgent },
+    // DLE search requires a POST request
+    const body = new URLSearchParams({
+      do: 'search',
+      subaction: 'search',
+      story: query.trim(),
+    });
+    const res = await fetch(`${BASE}/`, {
+      method: 'POST',
+      headers: {
+        'User-Agent': navigator.userAgent,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: body.toString(),
     });
     if (!res.ok) return [];
-    const html = await res.text();
-
-    return this._parseMovCards(html);
+    return this._parseMovCards(await res.text());
   }
 
   _parseMovCards(html) {

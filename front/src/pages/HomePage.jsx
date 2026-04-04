@@ -66,7 +66,7 @@ function OutdatedPage() {
         Extension obsolète
       </h1>
       <p className="text-white/40 text-base mb-2">
-        Votre extension AnimeHub est trop ancienne pour fonctionner avec cette version du site.
+        Votre extension Shinani est trop ancienne pour fonctionner avec cette version du site.
       </p>
       <p className="text-white/25 text-sm mb-10">
         Version minimale requise : <span className="text-amber-400 font-mono">{MIN_EXTENSION_VERSION}</span>
@@ -88,7 +88,7 @@ function OutdatedPage() {
           {[
             'Téléchargez la nouvelle extension ci-dessus',
             'Ouvrez chrome://extensions dans Chrome',
-            'Supprimez l\'ancienne extension AnimeHub',
+            'Supprimez l\'ancienne extension Shinani',
             'Glissez-déposez le nouveau fichier .zip (ou dossier décompressé) dans la page',
           ].map((step, i) => (
             <li key={i} className="flex items-start gap-3 text-sm text-white/40">
@@ -111,11 +111,11 @@ function WelcomePage() {
     <div className="relative max-w-3xl mx-auto px-4 sm:px-6 py-16">
       {/* Hero */}
       <div className="text-center mb-14 animate-fade-up">
-        <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-br from-accent-primary to-red-600 shadow-lg shadow-accent-primary/20 mb-6">
+        <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-br from-accent-primary to-accent-secondary shadow-lg shadow-accent-primary/30 mb-6 neon-glow">
           <Play className="w-10 h-10 text-white fill-white ml-1" />
         </div>
-        <h1 className="font-display font-bold text-4xl text-white mb-4">
-          Anime<span className="text-accent-primary">Hub</span>
+        <h1 className="font-display font-bold text-4xl mb-4 neon-text">
+          Shi<span className="text-accent-primary">nani</span>
         </h1>
         <p className="text-white/50 text-lg max-w-lg mx-auto leading-relaxed">
           Regardez vos animes et dramas favoris en VF et VOSTFR, le tout depuis une seule interface.
@@ -146,7 +146,7 @@ function WelcomePage() {
         <Puzzle className="w-10 h-10 text-accent-primary mx-auto mb-4" />
         <h2 className="font-display font-bold text-xl text-white mb-2">Extension requise</h2>
         <p className="text-white/40 text-sm mb-6 max-w-md mx-auto">
-          AnimeHub a besoin d'une extension navigateur pour fonctionner. Telechargez-la et installez-la en quelques etapes.
+          Shinani a besoin d'une extension navigateur pour fonctionner. Telechargez-la et installez-la en quelques etapes.
         </p>
         <a
           href={EXTENSION_DOWNLOAD_URL}
@@ -253,7 +253,7 @@ function SourceTutorial({ mobile }) {
       <div className="space-y-6">
         <Step number="1" icon={MousePointer} title="Ouvrir l'extension" delay={1}>
           <p className="text-white/40 text-sm leading-relaxed">
-            Cliquez sur l'icone <span className="text-white/70 font-medium">AnimeHub</span> dans la barre d'extensions de votre navigateur (en haut a droite).
+            Cliquez sur l'icone <span className="text-white/70 font-medium">Shinani</span> dans la barre d'extensions de votre navigateur (en haut a droite).
           </p>
         </Step>
 

@@ -65,7 +65,7 @@ export default function SourcesPage() {
         <p className="text-white/40 text-sm">
           {mobile
             ? 'Choisissez la source à utiliser pour parcourir les animes.'
-            : 'Sélectionnez une source via l\'icône AnimeHub dans votre navigateur.'}
+            : 'Sélectionnez une source via l\'icône Shinani dans votre navigateur.'}
         </p>
       </div>
 
@@ -73,7 +73,7 @@ export default function SourcesPage() {
         <div className="mb-6 flex items-start gap-3 px-4 py-3 rounded-xl bg-amber-500/8 border border-amber-500/20">
           <MousePointer className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
           <p className="text-amber-200/70 text-sm leading-relaxed">
-            Sur PC, la sélection de source se fait via le popup de l'extension AnimeHub dans la barre d'outils du navigateur.
+            Sur PC, la sélection de source se fait via le popup de l'extension Shinani dans la barre d'outils du navigateur.
           </p>
         </div>
       )}

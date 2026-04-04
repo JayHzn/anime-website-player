@@ -11,8 +11,8 @@ class Database:
     def __init__(self, db_path: str = None):
         if db_path is None:
             # In Docker, use /app/db/ volume. Locally, use same dir.
-            docker_path = "/app/data/animehub.db"
-            local_path = os.path.join(os.path.dirname(__file__), "animehub.db")
+            docker_path = "/app/data/shinani.db"
+            local_path = os.path.join(os.path.dirname(__file__), "shinani.db")
             db_path = docker_path if os.path.isdir("/app/data") else local_path
         self.db_path = db_path
         self._init_db()

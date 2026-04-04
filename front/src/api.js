@@ -22,7 +22,7 @@ function extRequest(action, payload = {}, timeoutMs = 15000) {
 
     const timer = setTimeout(() => {
       window.removeEventListener('message', handler);
-      reject(new Error('Extension non détectée. Installez l\'extension AnimeHub pour utiliser le site.'));
+      reject(new Error('Extension non détectée. Installez l\'extension Shinani pour utiliser le site.'));
     }, timeoutMs);
 
     function handler(event) {

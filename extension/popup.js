@@ -1,4 +1,4 @@
-// Popup: source selector for AnimeHub extension
+// Popup: source selector for Shinani extension
 
 const SOURCES = ['anime-sama', 'french-anime', 'vostfree'];
 
@@ -34,7 +34,7 @@ async function init() {
     await setSelectedSource(newSource);
     render(newSource);
 
-    // Navigate all AnimeHub tabs to homepage and reload (reset)
+    // Navigate all Shinani tabs to homepage and reload (reset)
     const origins = [
       'https://anime-website-player.onrender.com',
       'http://localhost:3000',

@@ -1,5 +1,5 @@
 """
-AnimeHub - Local Anime Streaming Aggregator
+Shinani - Local Anime Streaming Aggregator
 FastAPI Backend
 
 All scraping is handled client-side (browser extension or mobile app).
@@ -46,7 +46,7 @@ class CacheControlMiddleware(BaseHTTPMiddleware):
         return response
 
 
-app = FastAPI(title="AnimeHub API", version="0.2.0")
+app = FastAPI(title="Shinani API", version="0.2.0")
 
 app.add_middleware(CacheControlMiddleware)
 app.add_middleware(

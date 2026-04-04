@@ -5,15 +5,15 @@ export default {
     extend: {
       colors: {
         bg: {
-          primary: '#0a0a0f',
-          secondary: '#12121a',
-          card: '#1a1a2e',
-          hover: '#222240',
+          primary: '#07070f',
+          secondary: '#0e0e1c',
+          card: '#13132a',
+          hover: '#1c1c3a',
         },
         accent: {
-          primary: '#e63946',
-          glow: '#ff4d5a',
-          secondary: '#a8dadc',
+          primary: '#a855f7',
+          glow: '#c084fc',
+          secondary: '#7c3aed',
         },
       },
       fontFamily: {

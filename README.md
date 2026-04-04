@@ -1,4 +1,4 @@
-# AnimeHub
+# Shinani
 
 Plateforme de streaming d'anime et drama en VF et VOSTFR.
 
@@ -62,7 +62,7 @@ Plateforme de streaming d'anime et drama en VF et VOSTFR.
 ### Sur PC (Chrome, Edge, Brave...)
 
 1. Télécharge l'extension depuis les [Releases](https://github.com/JayHzn/anime-website-player/releases)
-2. Décompresse le fichier `AnimeHub-v1.1.10.zip`
+2. Décompresse le fichier `Shinani-v1.1.10.zip`
 3. Ouvre `chrome://extensions` dans ton navigateur
 4. Active le **mode développeur**
 5. Clique sur **"Charger l'extension non empaquetée"** et sélectionne le dossier décompressé
