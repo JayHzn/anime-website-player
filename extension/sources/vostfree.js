@@ -46,40 +46,40 @@ function idFromUrl(url) {
 
 export class VostfreeSource {
 
-  // ── Parse anime cards (.post divs) ───────────────────────
+  // ── Parse anime cards (shortstory-in image cards) ────────
 
   _parseCards(html) {
     const results = [];
     const seen = new Set();
-    const parts = html.split('<div class="post"');
-    for (let i = 1; i < parts.length; i++) {
-      const chunk = parts[i];
 
-      const linkM = chunk.match(/href="([^"]*vostfree\.ws\/[^"]+\.html)"/i);
+    // Image cards: <div class="shortstory-in"> ... <a class="short-images-link" href="..." title="...">
+    const cardRe = /<div\s+class="shortstory-in">([\s\S]*?)<\/div>\s*<\/div>\s*<\/div>/gi;
+    for (const m of matchAll(html, cardRe)) {
+      const chunk = m[1];
+
+      const linkM = chunk.match(/<a[^>]+class="short-images-link"[^>]*href="([^"]+)"[^>]*title="([^"]*)"/i)
+                  || chunk.match(/<a[^>]*href="(https:\/\/vostfree\.ws\/[^"]+\.html)"[^>]*title="([^"]*)"/i);
       if (!linkM) continue;
       const id = idFromUrl(linkM[1]);
       if (!id || seen.has(id)) continue;
       seen.add(id);
 
-      const titleM = chunk.match(/<h3[^>]*>[\s\S]*?<a[^>]*>([\s\S]*?)<\/a>/i);
-      const title = titleM ? decodeEntities(stripTags(titleM[1])) : id;
+      const title = decodeEntities(linkM[2]).replace(/\s*(VOSTFR|VF|FRENCH)\s*$/i, '').trim();
 
       const imgM = chunk.match(/<img[^>]+src="([^"]+)"/i);
       const rawCover = imgM ? imgM[1] : '';
       const cover = rawCover.startsWith('http') ? rawCover : `${BASE}${rawCover}`;
 
-      const epM = chunk.match(/<span[^>]*class="episodes"[^>]*>Ep\s*(\d+)/i);
+      // Episode count from <span class="film-rip"> <a>E24</a> <a>S01</a>
+      const epM = chunk.match(/<span\s+class="film-rip">[\s\S]*?<a[^>]*>E(\d+)<\/a>/i);
       const latestEpisode = epM ? parseInt(epM[1]) : null;
-
-      const yearM = chunk.match(/\/year\/(\d{4})\//);
-      const year = yearM ? parseInt(yearM[1]) : null;
 
       results.push({
         id,
         title,
         cover,
         type: 'Anime',
-        year,
+        year: null,
         latestEpisode,
         latestEpisodeId: null,
         source: 'vostfree',
@@ -185,12 +185,13 @@ export class VostfreeSource {
     if (!res.ok) throw new Error('Failed to load anime page');
     const html = await res.text();
 
-    // Per episode N: player indices (N-1)*5+1 … (N-1)*5+4
-    // [+1]=Sibnet(skip), [+2]=Uqload(id), [+3]=VOE(url), [+4]=Vudeo(url)
+    // Each episode has 5 player slots, mapped from the page JS:
+    //   slot 1 (new_player_sibnet)   → Sibnet ID (skip — session cookies required)
+    //   slot 2 (new_player_uqload)   → Uqload ID    → https://uqload.io/embed-${id}.html
+    //   slot 3 (new_player_vip)      → Full URL     (Streamsb/SbFull etc.)
+    //   slot 4 (new_player_vip)      → Full URL     (Vudeo)
+    //   slot 5 (new_player_mytv)     → Mytv ID      → https://www.myvi.tv/embed/${id}
     const base = (epN - 1) * 5;
-    const uqloadIdx = base + 2;
-    const voeIdx    = base + 3;
-    const vudeoIdx  = base + 4;
 
     function getContent(idx) {
       const re = new RegExp(`id="content_player_${idx}"[^>]*>([^<]*)<`, 'i');
@@ -198,20 +199,24 @@ export class VostfreeSource {
       return m ? m[1].trim() : '';
     }
 
-    const uqloadId = getContent(uqloadIdx);
-    const voeUrl   = getContent(voeIdx);
-    const vudeoUrl = getContent(vudeoIdx);
+    const uqloadId = getContent(base + 2);
+    const vipUrl1  = getContent(base + 3); // Streamsb/SbFull
+    const vipUrl2  = getContent(base + 4); // Vudeo
+    const mytvId   = getContent(base + 5);
 
     const sources = [];
 
-    if (voeUrl && voeUrl.startsWith('http')) {
-      sources.push({ name: 'VOE', url: forceHttps(voeUrl) });
-    }
     if (uqloadId && !uqloadId.includes(')') && uqloadId.length > 4) {
-      sources.push({ name: 'Uqload', url: `https://uqload.co/embed-${uqloadId}.html` });
+      sources.push({ name: 'Uqload', url: `https://uqload.io/embed-${uqloadId}.html` });
     }
-    if (vudeoUrl && vudeoUrl.startsWith('http')) {
-      sources.push({ name: 'Vudeo', url: forceHttps(vudeoUrl) });
+    if (vipUrl1 && vipUrl1.startsWith('http')) {
+      sources.push({ name: this._hostName(vipUrl1), url: forceHttps(vipUrl1) });
+    }
+    if (vipUrl2 && vipUrl2.startsWith('http')) {
+      sources.push({ name: this._hostName(vipUrl2), url: forceHttps(vipUrl2) });
+    }
+    if (mytvId && !mytvId.includes(')') && mytvId.length > 4 && !mytvId.startsWith('http')) {
+      sources.push({ name: 'Mytv', url: `https://www.myvi.tv/embed/${mytvId}` });
     }
 
     if (sources.length === 0) throw new Error(`No video URLs found for episode ${epN}`);
@@ -251,10 +256,30 @@ export class VostfreeSource {
     return /\.(m3u8|mp4|webm)(\?|$)/i.test(url || '');
   }
 
+  _hostName(url) {
+    try {
+      const host = new URL(url).hostname.toLowerCase();
+      if (host.includes('uqload')) return 'Uqload';
+      if (host.includes('vudeo')) return 'Vudeo';
+      if (host.includes('sbfull') || host.includes('streamsb') || host.includes('streamz')) return 'Streamsb';
+      if (host.includes('myvi')) return 'Mytv';
+      if (host.includes('voe')) return 'Voe';
+      return host;
+    } catch {
+      return 'Unknown';
+    }
+  }
+
   _hostPriority(url) {
-    if (url.includes('voe')) return 0;
-    if (url.includes('uqload')) return 1;
+    // Uqload extracts cleanly via player-extractor
+    if (url.includes('uqload')) return 0;
+    // Streamsb / SbFull: m3u8 in JWPlayer config
+    if (url.includes('sbfull') || url.includes('streamsb') || url.includes('streamz')) return 1;
+    // Vudeo: HLS.js
     if (url.includes('vudeo')) return 2;
+    // Mytv (myvi): often direct mp4
+    if (url.includes('myvi')) return 3;
+    if (url.includes('voe')) return 4;
     return 10;
   }
 

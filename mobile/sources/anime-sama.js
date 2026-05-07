@@ -111,6 +111,11 @@ export class AnimeSamaSource {
       const slug = slugFromUrl(href);
       if (!slug) continue;
 
+      // Filter: only keep Anime and Film types, skip Scans/Manga
+      const typeM = card.match(/<span[^>]*class="info-label"[^>]*>Types<\/span>\s*<p[^>]*class="info-value"[^>]*>([^<]*)<\/p>/i);
+      const typeVal = typeM ? typeM[1].trim().toLowerCase() : '';
+      if (typeVal && typeVal !== 'anime' && typeVal !== 'film') continue;
+
       const titleM = card.match(titleRe);
       const title = titleM ? decodeEntities(stripTags(titleM[1])) : slug;
 
@@ -138,34 +143,44 @@ export class AnimeSamaSource {
     if (!res.ok) return [];
     const html = await res.text();
 
+    // Only keep cards from the FIRST day section ("Sorties du [today]")
+    const firstDayIdx = html.indexOf('Sorties du');
+    const secondDayIdx = html.indexOf('Sorties du', firstDayIdx + 10);
+    const todaySection = secondDayIdx > 0 ? html.slice(firstDayIdx, secondDayIdx) : html.slice(firstDayIdx);
+
     const results = [];
     const seen = new Set();
     const cardRe = /<div[^>]*class="[^"]*anime-card-premium[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>\s*<\/a>\s*<\/div>/gi;
 
-    for (const m of matchAll(html, cardRe)) {
+    for (const m of matchAll(todaySection, cardRe)) {
       const card = m[0];
 
       const linkM = card.match(/<a[^>]*href="([^"]*)"[^>]*/i);
       const href = linkM ? linkM[1] : '';
       const slug = slugFromUrl(href);
-      if (!slug || seen.has(slug)) continue;
-      seen.add(slug);
+      if (!slug) continue;
+      const langM = card.match(/anime-card-premium[^"]*\s+Anime\s+(VF|VOSTFR)/i);
+      const lang = langM ? langM[1].toUpperCase() : '';
+      const dedupKey = `${slug}|${lang}`;
+      if (seen.has(dedupKey)) continue;
+      seen.add(dedupKey);
 
       const titleM = card.match(/<h2[^>]*class="card-title[^"]*"[^>]*>([\s\S]*?)<\/h2>/i);
-      const title = titleM ? decodeEntities(stripTags(titleM[1])) : slug;
+      const baseTitle = titleM ? decodeEntities(stripTags(titleM[1])) : slug;
+      const title = lang ? `${baseTitle} (${lang})` : baseTitle;
 
       const imgM = card.match(/<img[^>]*class="card-image[^"]*"[^>]*src="([^"]*)"[^>]*/i);
       const cover = imgM ? imgM[1] : `${COVER_BASE}/${slug}.jpg`;
 
-      const epM = card.match(/Ep\.\s*(\d+)/i);
-      const latestEpisode = epM ? parseInt(epM[1]) : null;
+      const seasonM = card.match(/<span[^>]*class="info-text"[^>]*>Saison\s*(\d+)/i);
+      const seasonNum = seasonM ? parseInt(seasonM[1]) : null;
 
       results.push({
         id: slug,
         title,
         cover,
         type: 'Anime',
-        latestEpisode,
+        latestEpisode: seasonNum,
         latestEpisodeId: null,
         source: 'anime-sama',
       });
@@ -230,7 +245,7 @@ export class AnimeSamaSource {
     const seasons = info.seasons || [];
 
     if (seasons.length === 0) {
-      seasons.push({ name: 'Saison 1 VOSTFR', url: 'saison1/vostfr' });
+      throw new Error('Aucun épisode disponible (contenu manga/scan uniquement).');
     }
 
     const episodes = [];

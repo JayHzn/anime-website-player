@@ -1,6 +1,6 @@
 // Popup: source selector for Shinani extension
 
-const SOURCES = ['anime-sama', 'french-anime', 'vostfree'];
+const SOURCES = ['anime-sama', 'vostfree', 'jetanimes'];
 
 async function getSelectedSource() {
   const result = await chrome.storage.local.get('selectedSource');
@@ -12,9 +12,9 @@ async function setSelectedSource(source) {
 }
 
 function render(selected) {
-  document.querySelectorAll('.source-item').forEach((btn) => {
-    const src = btn.dataset.source;
-    btn.classList.toggle('active', src === selected);
+  document.querySelectorAll('li[data-source]').forEach((li) => {
+    const src = li.dataset.source;
+    li.classList.toggle('active', src === selected);
   });
 }
 
@@ -23,10 +23,10 @@ async function init() {
   render(selected);
 
   document.getElementById('sourcesList').addEventListener('click', async (e) => {
-    const btn = e.target.closest('.source-item');
-    if (!btn) return;
+    const li = e.target.closest('li[data-source]');
+    if (!li) return;
 
-    const source = btn.dataset.source;
+    const source = li.dataset.source;
     const current = await getSelectedSource();
 
     // Toggle: click same source again to deselect

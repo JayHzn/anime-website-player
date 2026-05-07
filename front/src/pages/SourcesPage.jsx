@@ -6,8 +6,8 @@ import { api, getSourceMeta, getAvailableSources, isExtensionAvailable } from '.
 // Fallback metadata for desktop (where ping returns no sourceMeta)
 const DESKTOP_SOURCE_META = [
   { id: 'anime-sama',   name: 'Anime-Sama',  initials: 'AS', color: 'indigo',  url: 'anime-sama.to',    lang: 'fr' },
-  { id: 'french-anime', name: 'French Anime', initials: 'FA', color: 'pink',    url: 'french-anime.com', lang: 'fr' },
   { id: 'vostfree',     name: 'Vostfree',     initials: 'VF', color: 'emerald', url: 'vostfree.ws',      lang: 'fr' },
+  { id: 'jetanimes',    name: 'JetAnimes',    initials: 'JA', color: 'emerald', url: 'jetanimes.com',    lang: 'fr' },
 ];
 
 const COLOR_CLASSES = {

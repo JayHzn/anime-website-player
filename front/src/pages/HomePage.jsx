@@ -18,17 +18,17 @@ function SourceList() {
         </div>
       </div>
       <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/5">
-        <div className="w-8 h-8 rounded-lg bg-pink-500/15 flex items-center justify-center text-pink-400 font-bold text-xs">FA</div>
-        <div>
-          <span className="text-white/70 text-sm font-medium">French-anime</span>
-          <span className="text-white/25 text-xs ml-2">french-anime.com</span>
-        </div>
-      </div>
-      <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/5">
-        <div className="w-8 h-8 rounded-lg bg-emerald-500/15 flex items-center justify-center text-emerald-400 font-bold text-xs">VF</div>
+        <div className="w-8 h-8 rounded-lg bg-orange-500/15 flex items-center justify-center text-orange-400 font-bold text-xs">VF</div>
         <div>
           <span className="text-white/70 text-sm font-medium">Vostfree</span>
           <span className="text-white/25 text-xs ml-2">vostfree.ws</span>
+        </div>
+      </div>
+      <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/5">
+        <div className="w-8 h-8 rounded-lg bg-emerald-500/15 flex items-center justify-center text-emerald-400 font-bold text-xs">JA</div>
+        <div>
+          <span className="text-white/70 text-sm font-medium">JetAnimes</span>
+          <span className="text-white/25 text-xs ml-2">jetanimes.com</span>
         </div>
       </div>
     </div>

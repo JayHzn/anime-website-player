@@ -1,15 +1,15 @@
 import { AnimeSamaSource } from './sources/anime-sama.js';
-import { FrenchAnimeSource } from './sources/french-anime.js';
 import { VostfreeSource } from './sources/vostfree.js';
+import { JetAnimesSource } from './sources/jetanimes.js';
 
 // ── Available sources ────────────────────────────────────────
 
-export const AVAILABLE_SOURCES = ['anime-sama', 'french-anime', 'vostfree'];
+export const AVAILABLE_SOURCES = ['anime-sama', 'vostfree', 'jetanimes'];
 
 const sourceInstances = {
   'anime-sama': new AnimeSamaSource(),
-  'french-anime': new FrenchAnimeSource(),
   'vostfree': new VostfreeSource(),
+  'jetanimes': new JetAnimesSource(),
 };
 
 function getSource(name) {
