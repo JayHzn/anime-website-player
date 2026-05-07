@@ -87,9 +87,9 @@ export class JetAnimesSource {
       results.push({ id: slug, title, cover, type: 'Anime', year, source: 'jetanimes' });
     }
 
-    // Search results: article.w_item_b
+    // Search results: <div class="result-item"> with nested <article>
     if (results.length === 0) {
-      const srRe = /class="w_item_b"[^>]*>([\s\S]*?)<\/article>/gi;
+      const srRe = /<div\s+class="result-item">[\s\S]*?<\/article>\s*<\/div>/gi;
       for (const m of matchAll(html, srRe)) {
         const card = m[0];
         const hrefM = card.match(/href="([^"]*\/serie\/[^"]+)"/i);
@@ -102,10 +102,29 @@ export class JetAnimesSource {
         const cover = imgM ? imgM[1] : '';
         const title = imgM ? decodeEntities(imgM[2]) : slug;
 
-        const yearM = card.match(/<span class="wdate">(\d{4})/i);
+        const yearM = card.match(/<span class="year">(\d{4})/i);
         const year = yearM ? parseInt(yearM[1]) : null;
 
         results.push({ id: slug, title, cover, type: 'Anime', year, source: 'jetanimes' });
+      }
+    }
+
+    // Legacy fallback: w_item_b
+    if (results.length === 0) {
+      const wRe = /class="w_item_b"[^>]*>([\s\S]*?)<\/article>/gi;
+      for (const m of matchAll(html, wRe)) {
+        const card = m[0];
+        const hrefM = card.match(/href="([^"]*\/serie\/[^"]+)"/i);
+        if (!hrefM) continue;
+        const slug = slugFromUrl(hrefM[1]);
+        if (!slug || seen.has(slug)) continue;
+        seen.add(slug);
+
+        const imgM = card.match(/src="([^"]*)"[^>]*alt="([^"]*)"/i);
+        const cover = imgM ? imgM[1] : '';
+        const title = imgM ? decodeEntities(imgM[2]) : slug;
+
+        results.push({ id: slug, title, cover, type: 'Anime', year: null, source: 'jetanimes' });
       }
     }
 
@@ -272,8 +291,10 @@ export class JetAnimesSource {
     const nonce = nonceM ? nonceM[1] : '';
 
     // Get all available player options (servers)
+    // HTML: <li id='player-option-N' class='dooplay_player_option' data-nume='N'>
+    //         <span class='title'>PLAYER N</span>
     const sources = [];
-    const serverRe = /data-option="(\d+)"[^>]*>([^<]*)</gi;
+    const serverRe = /data-nume=['"](\d+)['"][^>]*>[\s\S]*?<span\s+class=['"]title['"]>([^<]*)</gi;
     for (const m of matchAll(html, serverRe)) {
       sources.push({ num: m[1], name: m[2].trim() });
     }

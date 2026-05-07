@@ -61,7 +61,7 @@ export class AnimeSamaSource {
     if (!res.ok) return [];
     const html = await res.text();
 
-    const results = [];
+    const allResults = [];
     const cardRe = /<a[^>]*class="asn-search-result"[^>]*>([\s\S]*?)<\/a>/gi;
     for (const m of matchAll(html, cardRe)) {
       const tag = m[0];
@@ -77,7 +77,7 @@ export class AnimeSamaSource {
       const imgM = inner.match(/<img[^>]*src="([^"]*)"[^>]*/i);
       const cover = imgM ? imgM[1] : `${COVER_BASE}/${slug}.jpg`;
 
-      results.push({
+      allResults.push({
         id: slug,
         title,
         cover,
@@ -86,7 +86,22 @@ export class AnimeSamaSource {
         source: 'anime-sama',
       });
     }
-    return results;
+
+    // Filter scan-only results
+    const checks = await Promise.all(
+      allResults.map((r) => this._isAnime(r.id).catch(() => false))
+    );
+    return allResults.filter((_, i) => checks[i]);
+  }
+
+  async _isAnime(slug) {
+    const res = await fetch(`${BASE}/catalogue/${slug}/`, {
+      headers: { 'User-Agent': UA },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return false;
+    const html = await res.text();
+    return /panneau(?:Anime|Film)\s*\(\s*["'][^"']+["']\s*,\s*["'][^"']+["']\s*\)/i.test(html);
   }
 
   // ── Catalogue ────────────────────────────────────────────

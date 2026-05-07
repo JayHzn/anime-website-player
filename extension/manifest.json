@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Shinani Source",
-  "version": "2.0.17",
+  "version": "2.0.1",
   "description": "Fournit les sources anime pour Shinani",
   "permissions": ["tabs", "scripting", "storage"],
   "host_permissions": [
@@ -19,7 +19,13 @@
     "https://*.myvi.tv/*",
     "https://www.myvi.tv/*",
     "https://on.jetanimes.com/*",
-    "https://secured.lol/*",
+    "https://*.lol/*",
+    "https://*.fitus.com/*",
+    "https://*.earnvids.com/*",
+    "https://*.vidhide.com/*",
+    "https://*.vidhide.pro/*",
+    "https://*.vidhidenet.com/*",
+    "https://*.vidhideplus.com/*",
     "https://*.vidmoly.to/*",
     "https://*.vidmoly.biz/*",
     "https://*.voe.sx/*",
@@ -77,7 +83,13 @@
         "https://sbfull.com/*",
         "https://*.myvi.tv/*",
         "https://www.myvi.tv/*",
-        "https://secured.lol/*"
+        "https://*.lol/*",
+        "https://*.fitus.com/*",
+        "https://*.earnvids.com/*",
+        "https://*.vidhide.com/*",
+        "https://*.vidhide.pro/*",
+        "https://*.vidhidenet.com/*",
+        "https://*.vidhideplus.com/*"
       ],
       "js": ["player-extractor.js"],
       "all_frames": true,

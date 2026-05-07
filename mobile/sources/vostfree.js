@@ -85,11 +85,56 @@ export class VostfreeSource {
 
   async search(query) {
     if (!query?.trim()) return this.getSeasonAnime();
-    const url = `${BASE}/?do=search&subaction=search&story=${encodeURIComponent(query)}`;
-    const res = await fetch(url, { headers: { 'User-Agent': UA } });
+    const body = `do=search&subaction=search&story=${encodeURIComponent(query)}`;
+    const res = await fetch(`${BASE}/index.php?do=search`, {
+      method: 'POST',
+      redirect: 'follow',
+      headers: {
+        'User-Agent': UA,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body,
+    });
     if (!res.ok) return [];
     const html = await res.text();
-    return this._parseCards(html);
+    return this._parseSearchResults(html);
+  }
+
+  _parseSearchResults(html) {
+    const results = [];
+    const seen = new Set();
+
+    const cardRe = /<div\s+class="search-result">([\s\S]*?)<div\s+class="alt">/gi;
+    for (const m of matchAll(html, cardRe)) {
+      const chunk = m[1];
+
+      const linkM = chunk.match(/<div\s+class="title">\s*<a[^>]+href="([^"]+)"[^>]*>([^<]+)<\/a>/i);
+      if (!linkM) continue;
+      const id = idFromUrl(linkM[1]);
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+
+      const title = decodeEntities(linkM[2]).replace(/\s*(VOSTFR|VF|FRENCH)\s*$/i, '').trim();
+
+      const imgM = chunk.match(/<span\s+class="image"><img[^>]+src="([^"]+)"/i);
+      const rawCover = imgM ? imgM[1] : '';
+      const cover = rawCover.startsWith('http') ? rawCover : `${BASE}${rawCover}`;
+
+      const yearM = chunk.match(/\/year\/(\d{4})\//);
+      const year = yearM ? parseInt(yearM[1]) : null;
+
+      results.push({
+        id,
+        title,
+        cover,
+        type: 'Anime',
+        year,
+        latestEpisode: null,
+        latestEpisodeId: null,
+        source: 'vostfree',
+      });
+    }
+    return results;
   }
 
   // ── Latest episodes (homepage) ───────────────────────────
