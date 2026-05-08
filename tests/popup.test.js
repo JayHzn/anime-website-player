@@ -7,47 +7,73 @@ const popupHtml = readFileSync(
   'utf-8'
 );
 
+const popupJs = readFileSync(
+  join(import.meta.dirname, '..', 'extension', 'popup.js'),
+  'utf-8'
+);
+
 describe('popup.html', () => {
-  it('contains all 3 source buttons', () => {
-    expect(popupHtml).toContain('data-source="anime-sama"');
-    expect(popupHtml).toContain('data-source="french-anime"');
-    expect(popupHtml).toContain('data-source="vostfree"');
+  it('uses a <select> dropdown for source selection', () => {
+    expect(popupHtml).toMatch(/<select\s+id="sourceSelect"/);
   });
 
-  it('does not contain old sources', () => {
+  it('contains an option for every active source', () => {
+    expect(popupHtml).toContain('value="anime-sama"');
+    expect(popupHtml).toContain('value="vostfree"');
+    expect(popupHtml).toContain('value="jetanimes"');
+  });
+
+  it('has an empty option to allow deselecting', () => {
+    expect(popupHtml).toMatch(/<option\s+value=""/);
+  });
+
+  it('does not contain removed sources', () => {
     expect(popupHtml).not.toContain('voiranime');
     expect(popupHtml).not.toContain('voirdrama');
-  });
-
-  it('has a sourcesList container', () => {
-    expect(popupHtml).toContain('id="sourcesList"');
+    expect(popupHtml).not.toContain('value="french-anime"');
   });
 
   it('loads popup.js', () => {
     expect(popupHtml).toContain('src="popup.js"');
   });
+});
 
-  it('has radio dot elements for each source', () => {
-    const radioDots = popupHtml.match(/class="radio-dot"/g);
-    expect(radioDots).toHaveLength(3);
+describe('popup.js', () => {
+  it('listens to the change event of the select', () => {
+    expect(popupJs).toMatch(/getElementById\(['"]sourceSelect['"]\)\.addEventListener\(['"]change['"]/);
+  });
+
+  it('persists the selected source in chrome.storage', () => {
+    expect(popupJs).toMatch(/chrome\.storage\.local\.set\(/);
+  });
+
+  it('reloads Shinani tabs after a source change', () => {
+    expect(popupJs).toMatch(/chrome\.tabs\.update/);
   });
 });
 
-describe('popup.js - source toggle logic', () => {
-  // Test the pure toggle logic extracted from popup.js
-  function toggleSource(current, clicked) {
-    return clicked === current ? null : clicked;
+describe('source selection logic', () => {
+  // Mirrors the validation in popup.js
+  const SOURCES = new Set(['anime-sama', 'vostfree', 'jetanimes']);
+  function pickSource(value) {
+    if (value === '' || value === null) return null;
+    return SOURCES.has(value) ? value : null;
   }
 
-  it('selects a source when none is selected', () => {
-    expect(toggleSource(null, 'anime-sama')).toBe('anime-sama');
+  it('returns null for empty value (deselect)', () => {
+    expect(pickSource('')).toBeNull();
+    expect(pickSource(null)).toBeNull();
   });
 
-  it('switches to a different source', () => {
-    expect(toggleSource('anime-sama', 'vostfree')).toBe('vostfree');
+  it('returns the source when valid', () => {
+    expect(pickSource('anime-sama')).toBe('anime-sama');
+    expect(pickSource('vostfree')).toBe('vostfree');
+    expect(pickSource('jetanimes')).toBe('jetanimes');
   });
 
-  it('deselects when clicking the same source', () => {
-    expect(toggleSource('anime-sama', 'anime-sama')).toBeNull();
+  it('returns null for unknown sources', () => {
+    expect(pickSource('voiranime')).toBeNull();
+    expect(pickSource('french-anime')).toBeNull();
+    expect(pickSource('garbage')).toBeNull();
   });
 });

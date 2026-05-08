@@ -19,27 +19,32 @@ describe('manifest.json', () => {
     expect(manifest.permissions).toContain('storage');
   });
 
-  it('has host permissions for new sources', () => {
+  it('has host permissions for active sources', () => {
     const hosts = manifest.host_permissions;
     expect(hosts).toContain('https://anime-sama.to/*');
-    expect(hosts).toContain('https://french-anime.com/*');
     expect(hosts).toContain('https://vostfree.ws/*');
+    expect(hosts).toContain('https://on.jetanimes.com/*');
   });
 
-  it('does not have old source host permissions', () => {
+  it('does not have removed source host permissions', () => {
     const hosts = manifest.host_permissions;
-    const hasOld = hosts.some(
-      (h) => h.includes('voiranime') || h.includes('voirdrama')
+    const hasRemoved = hosts.some(
+      (h) => h.includes('voiranime') || h.includes('voirdrama') || h.includes('french-anime.com')
     );
-    expect(hasOld).toBe(false);
+    expect(hasRemoved).toBe(false);
   });
 
-  it('has content scripts for AnimeHub pages', () => {
-    expect(manifest.content_scripts).toHaveLength(1);
-    const cs = manifest.content_scripts[0];
-    expect(cs.js).toContain('content.js');
-    expect(cs.run_at).toBe('document_start');
-    expect(cs.matches).toContain('https://anime-website-player.onrender.com/*');
+  it('has both content scripts (site bridge + player extractor)', () => {
+    expect(manifest.content_scripts).toHaveLength(2);
+    const siteCs = manifest.content_scripts.find((cs) => cs.js.includes('content.js'));
+    expect(siteCs).toBeDefined();
+    expect(siteCs.run_at).toBe('document_start');
+    expect(siteCs.matches).toContain('https://anime-website-player.onrender.com/*');
+
+    const playerCs = manifest.content_scripts.find((cs) => cs.js.includes('player-extractor.js'));
+    expect(playerCs).toBeDefined();
+    expect(playerCs.world).toBe('MAIN');
+    expect(playerCs.all_frames).toBe(true);
   });
 
   it('has a background service worker', () => {

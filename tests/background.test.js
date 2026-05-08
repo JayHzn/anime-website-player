@@ -17,13 +17,14 @@ const { version: MANIFEST_VERSION } = JSON.parse(
 // ── AVAILABLE_SOURCES ────────────────────────────────────────
 
 describe('AVAILABLE_SOURCES', () => {
-  it('contains exactly the 3 expected sources', () => {
-    expect(AVAILABLE_SOURCES).toEqual(['anime-sama', 'french-anime', 'vostfree']);
+  it('contains exactly the 3 active sources', () => {
+    expect(AVAILABLE_SOURCES).toEqual(['anime-sama', 'vostfree', 'jetanimes']);
   });
 
-  it('does not contain old sources', () => {
+  it('does not contain removed sources', () => {
     expect(AVAILABLE_SOURCES).not.toContain('voiranime');
     expect(AVAILABLE_SOURCES).not.toContain('voirdrama');
+    expect(AVAILABLE_SOURCES).not.toContain('french-anime');
   });
 });
 
@@ -74,13 +75,13 @@ describe('handleAction - source validation', () => {
     ).rejects.toThrow('Source non configurée');
   });
 
-  it('throws "not implemented" for unimplemented sources', async () => {
-    const implemented = new Set(['anime-sama', 'french-anime']);
-    const unimplemented = AVAILABLE_SOURCES.filter((s) => !implemented.has(s));
-    for (const source of unimplemented) {
+  it('all AVAILABLE_SOURCES are implemented (no "pas encore implémentée" error)', async () => {
+    for (const source of AVAILABLE_SOURCES) {
+      // An unknown action on an implemented source should throw "Action inconnue",
+      // NOT "pas encore implémentée".
       await expect(
-        handleAction('search', { source }, {})
-      ).rejects.toThrow('pas encore implémentée');
+        handleAction('nonexistent', { source }, {})
+      ).rejects.toThrow('Action inconnue');
     }
   });
 });
@@ -94,10 +95,16 @@ describe('handleAction - unknown actions', () => {
     ).rejects.toThrow('Action inconnue');
   });
 
-  it('throws "not implemented" for unknown actions with an unimplemented source', async () => {
+  it('throws "Action inconnue" for vostfree (now implemented)', async () => {
     await expect(
       handleAction('nonexistent', { source: 'vostfree' }, {})
-    ).rejects.toThrow('pas encore implémentée');
+    ).rejects.toThrow('Action inconnue');
+  });
+
+  it('throws "Action inconnue" for jetanimes (now implemented)', async () => {
+    await expect(
+      handleAction('nonexistent', { source: 'jetanimes' }, {})
+    ).rejects.toThrow('Action inconnue');
   });
 });
 

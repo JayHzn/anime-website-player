@@ -1,6 +1,6 @@
-// Popup: source selector for Shinani extension
+// Popup: source selector for Shinani extension (dropdown version)
 
-const SOURCES = ['anime-sama', 'vostfree', 'jetanimes'];
+const SOURCES = new Set(['anime-sama', 'vostfree', 'jetanimes']);
 
 async function getSelectedSource() {
   const result = await chrome.storage.local.get('selectedSource');
@@ -12,45 +12,38 @@ async function setSelectedSource(source) {
 }
 
 function render(selected) {
-  document.querySelectorAll('li[data-source]').forEach((li) => {
-    const src = li.dataset.source;
-    li.classList.toggle('active', src === selected);
+  const select = document.getElementById('sourceSelect');
+  if (select) select.value = selected || '';
+}
+
+async function reloadShinaniTabs() {
+  const origins = [
+    'https://anime-website-player.onrender.com',
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://localhost:5173',
+    'http://localhost:8080',
+    'http://localhost:8000',
+  ];
+  const tabs = await chrome.tabs.query({
+    url: origins.map((o) => `${o}/*`),
   });
+  for (const tab of tabs) {
+    const origin = origins.find((o) => tab.url?.startsWith(o));
+    await chrome.tabs.update(tab.id, { url: `${origin}/` });
+  }
 }
 
 async function init() {
   const selected = await getSelectedSource();
   render(selected);
 
-  document.getElementById('sourcesList').addEventListener('click', async (e) => {
-    const li = e.target.closest('li[data-source]');
-    if (!li) return;
-
-    const source = li.dataset.source;
-    const current = await getSelectedSource();
-
-    // Toggle: click same source again to deselect
-    const newSource = source === current ? null : source;
+  document.getElementById('sourceSelect').addEventListener('change', async (e) => {
+    const value = e.target.value || null;
+    // Validate the source is in our known list (or null to deselect)
+    const newSource = value === null || SOURCES.has(value) ? value : null;
     await setSelectedSource(newSource);
-    render(newSource);
-
-    // Navigate all Shinani tabs to homepage and reload (reset)
-    const origins = [
-      'https://anime-website-player.onrender.com',
-      'http://localhost:3000',
-      'http://localhost:3001',
-      'http://localhost:5173',
-      'http://localhost:8080',
-      'http://localhost:8000',
-    ];
-    const tabs = await chrome.tabs.query({
-      url: origins.map((o) => `${o}/*`),
-    });
-    for (const tab of tabs) {
-      const origin = origins.find((o) => tab.url?.startsWith(o));
-      // Navigate to homepage root, which forces a full reset
-      await chrome.tabs.update(tab.id, { url: `${origin}/` });
-    }
+    await reloadShinaniTabs();
   });
 }
 

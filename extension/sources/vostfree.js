@@ -46,34 +46,18 @@ function idFromUrl(url) {
 
 export class VostfreeSource {
 
-  // ── Parse anime cards (shortstory-in image cards) ────────
+  // ── Parse anime cards ────────────────────────────────────
+  // Vostfree was redesigned and now uses two card layouts:
+  //  - <div class="movie-poster"> (main grid on /animes-vostfr/, /animes-vf/, homepage)
+  //  - <ul class="movie-small"><li>...</li></ul> (sidebar lists, "top noté", etc.)
 
   _parseCards(html) {
     const results = [];
     const seen = new Set();
 
-    // Image cards: <div class="shortstory-in"> ... <a class="short-images-link" href="..." title="...">
-    const cardRe = /<div\s+class="shortstory-in">([\s\S]*?)<\/div>\s*<\/div>\s*<\/div>/gi;
-    for (const m of matchAll(html, cardRe)) {
-      const chunk = m[1];
-
-      const linkM = chunk.match(/<a[^>]+class="short-images-link"[^>]*href="([^"]+)"[^>]*title="([^"]*)"/i)
-                  || chunk.match(/<a[^>]*href="(https:\/\/vostfree\.ws\/[^"]+\.html)"[^>]*title="([^"]*)"/i);
-      if (!linkM) continue;
-      const id = idFromUrl(linkM[1]);
-      if (!id || seen.has(id)) continue;
+    const pushResult = (id, title, cover, latestEpisode = null) => {
+      if (!id || seen.has(id)) return;
       seen.add(id);
-
-      const title = decodeEntities(linkM[2]).replace(/\s*(VOSTFR|VF|FRENCH)\s*$/i, '').trim();
-
-      const imgM = chunk.match(/<img[^>]+src="([^"]+)"/i);
-      const rawCover = imgM ? imgM[1] : '';
-      const cover = rawCover.startsWith('http') ? rawCover : `${BASE}${rawCover}`;
-
-      // Episode count from <span class="film-rip"> <a>E24</a> <a>S01</a>
-      const epM = chunk.match(/<span\s+class="film-rip">[\s\S]*?<a[^>]*>E(\d+)<\/a>/i);
-      const latestEpisode = epM ? parseInt(epM[1]) : null;
-
       results.push({
         id,
         title,
@@ -84,7 +68,57 @@ export class VostfreeSource {
         latestEpisodeId: null,
         source: 'vostfree',
       });
+    };
+
+    // --- Layout 1: <div class="movie-poster"> (main grid)
+    // Inside: <div class="play"><a href="..." alt="TITLE"><span>TITLE</span></a></div>
+    //         <span class="image"><img src="..." alt="TITLE"/></span>
+    //         <div class="alt"><div class="kp"><b>SS</b></div><div class="year"><b>EE</b></div></div>
+    const posterRe = /<div\s+class="movie-poster">([\s\S]*?)<\/div>\s*(?=<div\s+class="movie-poster">|<\/div>\s*<\/div>\s*<\/div>)/gi;
+    for (const m of matchAll(html, posterRe)) {
+      const chunk = m[1];
+
+      const linkM = chunk.match(/<a[^>]*class="fa\s+fa-play\s+link"[^>]*href="([^"]+)"[^>]*alt="([^"]*)"/i)
+                 || chunk.match(/<a[^>]*href="(https:\/\/vostfree\.ws\/[^"]+\.html)"[^>]*(?:title|alt)="([^"]*)"/i);
+      if (!linkM) continue;
+      const id = idFromUrl(linkM[1]);
+      const title = decodeEntities(linkM[2]).replace(/\s*(VOSTFR|VF|FRENCH)\s*$/i, '').trim();
+
+      const imgM = chunk.match(/<img[^>]+src="([^"]+)"/i);
+      const rawCover = imgM ? imgM[1] : '';
+      const cover = rawCover.startsWith('http') ? rawCover : `${BASE}${rawCover}`;
+
+      // Episode count: <div class="year"><span>...</span><b>NN</b></div>
+      const epM = chunk.match(/<div\s+class="year">[\s\S]*?<b>(\d+)<\/b>/i);
+      const latestEpisode = epM ? parseInt(epM[1]) : null;
+
+      pushResult(id, title, cover, latestEpisode);
     }
+
+    // --- Layout 2: <ul class="movie-small"><li> items
+    const listRe = /<ul\s+class="movie-small"[^>]*>([\s\S]*?)<\/ul>/gi;
+    for (const listM of matchAll(html, listRe)) {
+      const list = listM[1];
+      const liRe = /<li>([\s\S]*?)<\/li>/gi;
+      for (const liM of matchAll(list, liRe)) {
+        const chunk = liM[1];
+        const linkM = chunk.match(/<a[^>]+href="(https:\/\/vostfree\.ws\/[^"]+\.html)"[^>]*title="([^"]*)"/i);
+        if (!linkM) continue;
+        const id = idFromUrl(linkM[1]);
+        const title = decodeEntities(linkM[2]).replace(/\s*(VOSTFR|VF|FRENCH)\s*$/i, '').trim();
+
+        const imgM = chunk.match(/<img[^>]+src="([^"]+)"/i);
+        const rawCover = imgM ? imgM[1] : '';
+        const cover = rawCover.startsWith('http') ? rawCover : `${BASE}${rawCover}`;
+
+        // Episode count: <div class="year"><span>...</span><b>NN</b></div>
+        const epM = chunk.match(/<div\s+class="year">[\s\S]*?<b>(\d+)<\/b>/i);
+        const latestEpisode = epM ? parseInt(epM[1]) : null;
+
+        pushResult(id, title, cover, latestEpisode);
+      }
+    }
+
     return results;
   }
 

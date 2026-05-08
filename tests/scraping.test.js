@@ -54,23 +54,8 @@ describe('anime-sama.to', () => {
   }, TIMEOUT);
 });
 
-describe('french-anime.com', () => {
-  it('homepage is reachable (may be Cloudflare-protected)', async () => {
-    const res = await fetch('https://french-anime.com/', {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-    });
-    // Cloudflare may return 403/503, so we just check we got a response
-    expect(res.status).toBeDefined();
-    // If we get through, the page should have HTML content
-    if (res.ok) {
-      const html = await res.text();
-      expect(html).toContain('<html');
-    }
-  }, TIMEOUT);
-});
-
 describe('vostfree.ws', () => {
-  it('homepage is reachable (may be Cloudflare-protected)', async () => {
+  it('homepage is reachable', async () => {
     const res = await fetch('https://vostfree.ws/', {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
     });
@@ -78,6 +63,50 @@ describe('vostfree.ws', () => {
     if (res.ok) {
       const html = await res.text();
       expect(html).toContain('<html');
+    }
+  }, TIMEOUT);
+
+  it('search endpoint (POST) returns results', async () => {
+    const res = await fetch('https://vostfree.ws/index.php?do=search', {
+      method: 'POST',
+      redirect: 'follow',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
+      body: 'do=search&subaction=search&story=naruto',
+    });
+    expect(res.status).toBeDefined();
+    if (res.ok) {
+      const html = await res.text();
+      // Search results should contain at least one search-result card
+      expect(html).toContain('class="search-result"');
+    }
+  }, TIMEOUT);
+});
+
+describe('jetanimes.com', () => {
+  it('homepage is reachable', async () => {
+    const res = await fetch('https://jetanimes.com/', {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      redirect: 'follow',
+    });
+    expect(res.status).toBeDefined();
+    if (res.ok) {
+      const html = await res.text();
+      expect(html).toContain('<html');
+    }
+  }, TIMEOUT);
+
+  it('search returns result-item cards', async () => {
+    const res = await fetch('https://jetanimes.com/?s=naruto', {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      redirect: 'follow',
+    });
+    expect(res.status).toBeDefined();
+    if (res.ok) {
+      const html = await res.text();
+      expect(html).toContain('class="result-item"');
     }
   }, TIMEOUT);
 });

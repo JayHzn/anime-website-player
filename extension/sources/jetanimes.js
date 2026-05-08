@@ -51,6 +51,15 @@ function seasonNumberFromSlug(slug) {
   return m ? parseInt(m[1]) : 1;
 }
 
+/** Slugify a title for use as anime URL slug (e.g. "Go For It, Nakamura-kun!!" → "go-for-it-nakamura-kun"). */
+function slugifyTitle(title) {
+  return title
+    .toLowerCase()
+    .normalize('NFD').replace(/\p{M}+/gu, '')   // strip combining diacritics
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
 function get(url) {
   return fetch(url, { headers: { 'User-Agent': UA } });
 }
@@ -182,31 +191,45 @@ export class JetAnimesSource {
 
     const results = [];
     const seen = new Set();
-    const re = /class="poster"[^>]*>([\s\S]*?)<\/article>/gi;
+    // Cards: <article class="item se episodes" id="post-N">
+    //          <div class="poster">...<img alt="Anime: Saison X Episode Y" src="..."/></div>
+    //          <div class="data"><h3><a href=".../episodes/...">Épisode N</a></h3>
+    //                            <span class="serie">ANIME TITLE</span></div>
+    //        </article>
+    const articleRe = /<article[^>]*class="[^"]*item[^"]*episodes[^"]*"[^>]*>([\s\S]*?)<\/article>/gi;
 
-    for (const m of matchAll(html, re)) {
-      const card = m[0];
+    for (const m of matchAll(html, articleRe)) {
+      const card = m[1];
+
       const hrefM = card.match(/href="([^"]*\/episodes\/[^"]+)"/i);
       if (!hrefM) continue;
       const epSlug = episodeSlugFromUrl(hrefM[1]);
-      if (!epSlug || seen.has(epSlug)) continue;
-      seen.add(epSlug);
+      if (!epSlug) continue;
 
-      const imgM = card.match(/src="([^"]*)"[^>]*alt="([^"]*)"/i);
+      const imgM = card.match(/<img[^>]*src="([^"]*)"[^>]*alt="([^"]*)"/i);
       const cover = imgM ? imgM[1] : '';
-      const fullTitle = imgM ? decodeEntities(imgM[2]) : epSlug;
+
+      // Prefer the explicit series title from <span class="serie">…</span>
+      const serieM = card.match(/<span\s+class="serie">([^<]+)<\/span>/i);
+      const animeTitle = serieM
+        ? decodeEntities(serieM[1]).trim()
+        : (imgM ? decodeEntities(imgM[2]).replace(/\s*:\s*Saison.*$/i, '').trim() : epSlug);
+
+      // Derive the anime slug from the title — used by AnimePage and the watch-page back button
+      const animeSlug = slugifyTitle(animeTitle);
+      // Per anime, keep only the most-recent episode in the carousel
+      if (!animeSlug || seen.has(animeSlug)) continue;
+      seen.add(animeSlug);
+
       const epNum = episodeNumberFromSlug(epSlug);
 
-      // Extract anime title from episode title (e.g. "Naruto: Saison 1 Episode 7" → "Naruto")
-      const animeTitle = fullTitle.replace(/\s*:\s*Saison.*$/i, '').trim();
-
       results.push({
-        id: epSlug,
+        id: animeSlug,           // anime slug for /anime/SOURCE/SLUG and back-button
         title: animeTitle,
         cover,
         type: 'Anime',
         latestEpisode: epNum,
-        latestEpisodeId: epSlug,
+        latestEpisodeId: epSlug, // episode slug for /watch/SOURCE/EPSLUG
         source: 'jetanimes',
       });
     }
