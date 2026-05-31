@@ -24,6 +24,8 @@ describe('manifest.json', () => {
     expect(hosts).toContain('https://anime-sama.to/*');
     expect(hosts).toContain('https://vostfree.ws/*');
     expect(hosts).toContain('https://on.jetanimes.com/*');
+    expect(hosts).toContain('https://api.franime.fr/*');
+    expect(hosts).toContain('https://franime.fr/*');
   });
 
   it('does not have removed source host permissions', () => {

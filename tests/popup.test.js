@@ -21,6 +21,7 @@ describe('popup.html', () => {
     expect(popupHtml).toContain('value="anime-sama"');
     expect(popupHtml).toContain('value="vostfree"');
     expect(popupHtml).toContain('value="jetanimes"');
+    expect(popupHtml).toContain('value="franime"');
   });
 
   it('has an empty option to allow deselecting', () => {
@@ -54,7 +55,7 @@ describe('popup.js', () => {
 
 describe('source selection logic', () => {
   // Mirrors the validation in popup.js
-  const SOURCES = new Set(['anime-sama', 'vostfree', 'jetanimes']);
+  const SOURCES = new Set(['anime-sama', 'vostfree', 'jetanimes', 'franime']);
   function pickSource(value) {
     if (value === '' || value === null) return null;
     return SOURCES.has(value) ? value : null;
@@ -69,6 +70,7 @@ describe('source selection logic', () => {
     expect(pickSource('anime-sama')).toBe('anime-sama');
     expect(pickSource('vostfree')).toBe('vostfree');
     expect(pickSource('jetanimes')).toBe('jetanimes');
+    expect(pickSource('franime')).toBe('franime');
   });
 
   it('returns null for unknown sources', () => {

@@ -160,53 +160,87 @@ export class AnimeSamaSource {
     if (!res.ok) return [];
     const html = await res.text();
 
-    // Only keep cards from the FIRST day section ("Sorties du [today]")
-    // — sections after that are previous days, not "today"
-    const firstDayIdx = html.indexOf('Sorties du');
-    const secondDayIdx = html.indexOf('Sorties du', firstDayIdx + 10);
-    const todaySection = secondDayIdx > 0 ? html.slice(firstDayIdx, secondDayIdx) : html.slice(firstDayIdx);
+    // anime-sama orders sections by weekday (Sun→Sat), not chronologically.
+    // We extract every "Sorties du [Day] - DD/MM" section, filter to past+today,
+    // sort by date descending, and concatenate cards (newest first).
+    const sections = this._collectDaySections(html);
 
     const results = [];
     const seen = new Set();
-    // anime-card-premium cards (skip scan-card-premium for manga/scans)
     const cardRe = /<div[^>]*class="[^"]*anime-card-premium[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>\s*<\/a>\s*<\/div>/gi;
 
-    for (const m of matchAll(todaySection, cardRe)) {
-      const card = m[0];
+    for (const section of sections) {
+      for (const m of matchAll(section, cardRe)) {
+        const card = m[0];
 
-      const linkM = card.match(/<a[^>]*href="([^"]*)"[^>]*/i);
-      const href = linkM ? linkM[1] : '';
-      const slug = slugFromUrl(href);
-      if (!slug) continue;
-      // De-duplicate per anime+language (since same anime can be in VF + VOSTFR)
-      const langM = card.match(/anime-card-premium[^"]*\s+Anime\s+(VF|VOSTFR)/i);
-      const lang = langM ? langM[1].toUpperCase() : '';
-      const dedupKey = `${slug}|${lang}`;
-      if (seen.has(dedupKey)) continue;
-      seen.add(dedupKey);
+        const linkM = card.match(/<a[^>]*href="([^"]*)"[^>]*/i);
+        const href = linkM ? linkM[1] : '';
+        const slug = slugFromUrl(href);
+        if (!slug) continue;
 
-      const titleM = card.match(/<h2[^>]*class="card-title[^"]*"[^>]*>([\s\S]*?)<\/h2>/i);
-      const baseTitle = titleM ? decodeEntities(stripTags(titleM[1])) : slug;
-      const title = lang ? `${baseTitle} (${lang})` : baseTitle;
+        // De-duplicate per anime+language
+        const langM = card.match(/anime-card-premium[^"]*\s+Anime\s+(VF|VOSTFR)/i);
+        const lang = langM ? langM[1].toUpperCase() : '';
+        const dedupKey = `${slug}|${lang}`;
+        if (seen.has(dedupKey)) continue;
+        seen.add(dedupKey);
 
-      const imgM = card.match(/<img[^>]*class="card-image[^"]*"[^>]*src="([^"]*)"[^>]*/i);
-      const cover = imgM ? imgM[1] : `${COVER_BASE}/${slug}.jpg`;
+        const titleM = card.match(/<h2[^>]*class="card-title[^"]*"[^>]*>([\s\S]*?)<\/h2>/i);
+        const baseTitle = titleM ? decodeEntities(stripTags(titleM[1])) : slug;
+        const title = lang ? `${baseTitle} (${lang})` : baseTitle;
 
-      // Season info: <span class="info-text">Saison 1</span>
-      const seasonM = card.match(/<span[^>]*class="info-text"[^>]*>Saison\s*(\d+)/i);
-      const seasonNum = seasonM ? parseInt(seasonM[1]) : null;
+        const imgM = card.match(/<img[^>]*class="card-image[^"]*"[^>]*src="([^"]*)"[^>]*/i);
+        const cover = imgM ? imgM[1] : `${COVER_BASE}/${slug}.jpg`;
 
-      results.push({
-        id: slug,
-        title,
-        cover,
-        type: 'Anime',
-        latestEpisode: seasonNum,  // shown as "S{N}" in card
-        latestEpisodeId: null,
-        source: 'anime-sama',
-      });
+        const seasonM = card.match(/<span[^>]*class="info-text"[^>]*>Saison\s*(\d+)/i);
+        const seasonNum = seasonM ? parseInt(seasonM[1]) : null;
+
+        results.push({
+          id: slug,
+          title,
+          cover,
+          type: 'Anime',
+          latestEpisode: seasonNum,
+          latestEpisodeId: null,
+          source: 'anime-sama',
+        });
+      }
     }
     return results;
+  }
+
+  // Returns the HTML of each "Sorties du [Day] - DD/MM" section that is today or in the past,
+  // sorted newest-first. Future-dated sections (tomorrow's scheduled) are skipped.
+  _collectDaySections(html) {
+    const sectionStarts = [];
+    const headerRe = /Sorties du [A-Za-zé]+ - (\d{2})\/(\d{2})/g;
+    let m;
+    while ((m = headerRe.exec(html)) !== null) {
+      sectionStarts.push({ idx: m.index, day: parseInt(m[1]), month: parseInt(m[2]) });
+    }
+    if (sectionStarts.length === 0) return [];
+
+    const today = new Date();
+    const todayKey = today.getMonth() * 31 + today.getDate(); // simple ordinal for comparison
+
+    // Compute a sortable date for each section. Anime-sama only shows DD/MM.
+    // Assume current year; if the date would be more than ~7 days in the future,
+    // it's likely from last year (past rollover edge case).
+    const sections = sectionStarts.map((s, i) => {
+      const next = sectionStarts[i + 1];
+      const sectionHtml = next ? html.slice(s.idx, next.idx) : html.slice(s.idx);
+      const ordinal = (s.month - 1) * 31 + s.day;
+      let isFuture = ordinal > todayKey;
+      // Tolerate 1-day timezone drift (e.g. day 09 vs day 10 near midnight)
+      if (ordinal === todayKey + 1 && (today.getHours() >= 22)) isFuture = false;
+      return { sectionHtml, ordinal, isFuture };
+    });
+
+    // Keep past + today only, then sort descending (newest first)
+    return sections
+      .filter((s) => !s.isFuture)
+      .sort((a, b) => b.ordinal - a.ordinal)
+      .map((s) => s.sectionHtml);
   }
 
   // ── Season anime (catalogue) ─────────────────────────────
@@ -267,9 +301,36 @@ export class AnimeSamaSource {
 
   // ── Episodes list ────────────────────────────────────────
 
+  // Detects placeholder URLs like:
+  //   https://video.sibnet.ru/shell.php?videoid=
+  //   https://vidmoly.to/embed-.html
+  //   https://sendvid.com/embed/
+  //   https://lpayer.embed4me.com/#
+  // These are template entries left in the eps array but contain no real ID.
+  _isValidEpUrl(url) {
+    if (!url || typeof url !== 'string') return false;
+    // Strip the trailing ".html" / ".php" so we can compare the meaningful tail
+    const u = url.replace(/\.(html|php)$/i, '');
+    // Find the last segment after =, /, # or - and check it has 3+ alphanumeric chars
+    const idx = Math.max(u.lastIndexOf('='), u.lastIndexOf('#'), u.lastIndexOf('/'), u.lastIndexOf('-'));
+    if (idx < 0) return false;
+    const id = u.slice(idx + 1);
+    return /[a-zA-Z0-9]{3,}/.test(id);
+  }
+
+  // Parses every "var epsN = [...]" array in the JS source.
+  _parseAllEpsArrays(js) {
+    const arrays = [];
+    const epsArrRe = /var\s+eps\d+\s*=\s*\[([\s\S]*?)\];/g;
+    let m;
+    while ((m = epsArrRe.exec(js)) !== null) {
+      const urls = [...m[1].matchAll(/['"]([^'"]+)['"]/g)].map((x) => x[1]);
+      arrays.push(urls);
+    }
+    return arrays;
+  }
+
   async getEpisodes(animeId) {
-    // animeId = slug (e.g. "naruto")
-    // First, get anime info to find available seasons
     const info = await this.getAnimeInfo(animeId);
     const seasons = info.seasons || [];
 
@@ -290,15 +351,14 @@ export class AnimeSamaSource {
         if (!res.ok) continue;
         const js = await res.text();
 
-        // Parse eps1 = [...] to count episodes
-        const epsM = js.match(/var\s+eps1\s*=\s*\[([\s\S]*?)\];/);
-        if (!epsM) continue;
+        const arrays = this._parseAllEpsArrays(js);
+        if (arrays.length === 0) continue;
 
-        // Count URLs in eps1 array
-        const urlMatches = epsM[1].match(/'[^']+'/g) || epsM[1].match(/"[^"]+"/g) || [];
-        const count = urlMatches.length;
-
-        for (let i = 0; i < count; i++) {
+        // For each episode index i, only count it if at least one host has a real (non-placeholder) URL.
+        const maxLen = Math.max(...arrays.map((a) => a.length));
+        for (let i = 0; i < maxLen; i++) {
+          const hasValid = arrays.some((arr) => this._isValidEpUrl(arr[i]));
+          if (!hasValid) continue;
           const epNum = i + 1;
           episodes.push({
             id: `${animeId}/${seasonUrl}/${epNum}`,
@@ -346,7 +406,10 @@ export class AnimeSamaSource {
       }
 
       if (urls.length >= epNum) {
-        const url = forceHttps(urls[epNum - 1]);
+        const rawUrl = urls[epNum - 1];
+        // Skip placeholder/empty URLs (e.g. "https://vidmoly.to/embed-.html")
+        if (!this._isValidEpUrl(rawUrl)) continue;
+        const url = forceHttps(rawUrl);
         const hostName = this._getHostName(url);
         sources.push({ name: `${hostName} (${varName})`, url });
       }
@@ -361,19 +424,27 @@ export class AnimeSamaSource {
       throw new Error(`No video URL found for episode ${epNum}`);
     }
 
-    // Try each source in order — return the first that resolves to a direct video URL
-    for (const src of finalSources) {
-      const resolved = await this._resolveVideoUrl(src.url);
-      if (this._isDirectUrl(resolved.url)) {
-        return {
-          url: resolved.url,
-          sourceUrl: src.url,
-          referer: `${BASE}/`,
-          headers: { Referer: `${BASE}/` },
-          subtitles: [],
-          sources: finalSources,
-        };
-      }
+    // Resolve every embed concurrently, then keep the first (highest-priority, since
+    // finalSources is already sorted) that yields a direct video URL. Promise.all
+    // preserves order, so .find() returns the same pick as a sequential loop —
+    // but the wall-clock cost is one timeout instead of the sum of all of them.
+    const resolvedAll = await Promise.all(
+      finalSources.map((src) =>
+        this._resolveVideoUrl(src.url)
+          .then((r) => ({ src, url: r.url }))
+          .catch(() => ({ src, url: src.url }))
+      )
+    );
+    const direct = resolvedAll.find((r) => this._isDirectUrl(r.url));
+    if (direct) {
+      return {
+        url: direct.url,
+        sourceUrl: direct.src.url,
+        referer: `${BASE}/`,
+        headers: { Referer: `${BASE}/` },
+        subtitles: [],
+        sources: finalSources,
+      };
     }
 
     // No direct URL found — fall back to best embed URL in iframe mode
@@ -398,6 +469,8 @@ export class AnimeSamaSource {
       if (host.includes('sendvid')) return 'SendVid';
       if (host.includes('streamtape')) return 'Streamtape';
       if (host.includes('f16px') || host.includes('fmoonh')) return 'F16px';
+      if (host.includes('embed4me') || host.includes('lpayer')) return 'Embed4me';
+      if (host.includes('minochinos')) return 'Minochinos';
       return host;
     } catch {
       return 'Unknown';
@@ -418,9 +491,12 @@ export class AnimeSamaSource {
     if (url.includes('voe')) return 2;
     // streamtape: obfuscated token URL
     if (url.includes('streamtape')) return 3;
-
-    // vidmoly: CF Turnstile blocks fetch → iframe only
-    if (url.includes('vidmoly')) return 5;
+    // embed4me / lpayer: lightweight player
+    if (url.includes('embed4me') || url.includes('lpayer')) return 4;
+    // minochinos: similar
+    if (url.includes('minochinos')) return 5;
+    // vidmoly: known unreliable (frequent ww1.vidmoly.to outages, CF Turnstile) → last resort
+    if (url.includes('vidmoly')) return 99;
     return 10;
   }
 

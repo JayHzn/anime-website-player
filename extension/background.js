@@ -1,15 +1,17 @@
 import { AnimeSamaSource } from './sources/anime-sama.js';
 import { VostfreeSource } from './sources/vostfree.js';
 import { JetAnimesSource } from './sources/jetanimes.js';
+import { FRAnimeSource } from './sources/franime.js';
 
 // ── Available sources ────────────────────────────────────────
 
-export const AVAILABLE_SOURCES = ['anime-sama', 'vostfree', 'jetanimes'];
+export const AVAILABLE_SOURCES = ['anime-sama', 'vostfree', 'jetanimes', 'franime'];
 
 const sourceInstances = {
   'anime-sama': new AnimeSamaSource(),
   'vostfree': new VostfreeSource(),
   'jetanimes': new JetAnimesSource(),
+  'franime': new FRAnimeSource(),
 };
 
 function getSource(name) {
@@ -41,6 +43,30 @@ export function getCachedSearch(source, query) {
 
 export function setSearchCache(source, query, results) {
   searchCache.set(`${source}:${query}`, { results: [...results], at: Date.now() });
+}
+
+// ── Result cache (episodes / anime info) ─────────────────────
+// Stable, navigation-heavy data (anime page → watch → back) re-fetched often.
+// Short TTL keeps it fresh enough while making back-and-forth instant.
+// NOTE: getVideoUrl is intentionally NOT cached — its resolved URLs can carry
+// short-lived tokens that would 403 if replayed later.
+
+export const resultCache = new Map();
+export const RESULT_CACHE_TTL = 300000; // 5 min
+
+export function getCachedResult(key) {
+  const entry = resultCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.at > RESULT_CACHE_TTL) {
+    resultCache.delete(key);
+    return null;
+  }
+  // Return a structured copy so callers can't mutate the cached value.
+  return structuredClone(entry.value);
+}
+
+export function setCachedResult(key, value) {
+  resultCache.set(key, { value: structuredClone(value), at: Date.now() });
 }
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -90,11 +116,27 @@ async function handleSourceAction(action, payload, sender, sourceName, source) {
       enrichCovers(source, sourceName, results, sender);
       return results;
     }
-    case 'getEpisodes':
-      return await source.getEpisodes(payload.animeId);
+    case 'getEpisodes': {
+      const key = `episodes:${sourceName}:${payload.animeId}`;
+      const cached = getCachedResult(key);
+      if (cached) {
+        console.log(`[ext] episodes cache HIT (${sourceName}:${payload.animeId})`);
+        return cached;
+      }
+      const episodes = await source.getEpisodes(payload.animeId);
+      setCachedResult(key, episodes);
+      return episodes;
+    }
     case 'getAnimeInfo': {
+      const key = `info:${sourceName}:${payload.animeId}`;
+      const cached = getCachedResult(key);
+      if (cached) {
+        console.log(`[ext] animeInfo cache HIT (${sourceName}:${payload.animeId})`);
+        return cached;
+      }
       const info = await source.getAnimeInfo(payload.animeId);
       if (info) info.source = sourceName;
+      setCachedResult(key, info);
       return info;
     }
     case 'getLatestEpisodes': {

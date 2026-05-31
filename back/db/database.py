@@ -58,12 +58,18 @@ class Database:
                     anime_cover TEXT,
                     source TEXT NOT NULL,
                     episode_number INTEGER NOT NULL DEFAULT 1,
+                    episode_id TEXT,
                     total_episodes INTEGER,
                     timestamp REAL DEFAULT 0,
                     updated_at REAL NOT NULL,
                     PRIMARY KEY (anime_id, user_id)
                 )
             """)
+            # Migration: add episode_id column if missing (was added in v2)
+            cols2 = [r[1] for r in conn.execute("PRAGMA table_info(progress)").fetchall()]
+            if "episode_id" not in cols2:
+                conn.execute("ALTER TABLE progress ADD COLUMN episode_id TEXT")
+                conn.commit()
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS skip_segments (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -107,21 +113,23 @@ class Database:
         total_episodes: int | None,
         timestamp: float,
         user_id: str = "default",
+        episode_id: str | None = None,
     ):
         with self._conn() as conn:
             conn.execute(
                 """
                 INSERT INTO progress
-                    (anime_id, user_id, anime_title, anime_cover, source, episode_number, total_episodes, timestamp, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (anime_id, user_id, anime_title, anime_cover, source, episode_number, episode_id, total_episodes, timestamp, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(anime_id, user_id) DO UPDATE SET
                     episode_number = excluded.episode_number,
+                    episode_id = excluded.episode_id,
                     total_episodes = excluded.total_episodes,
                     timestamp = excluded.timestamp,
                     anime_cover = excluded.anime_cover,
                     updated_at = excluded.updated_at
                 """,
-                (anime_id, user_id, anime_title, anime_cover, source, episode_number, total_episodes, timestamp, time.time()),
+                (anime_id, user_id, anime_title, anime_cover, source, episode_number, episode_id, total_episodes, timestamp, time.time()),
             )
             conn.commit()
 

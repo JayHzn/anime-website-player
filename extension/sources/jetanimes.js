@@ -142,26 +142,33 @@ export class JetAnimesSource {
 
   // ── Parse episode poster cards (/episodes/ listing) ──────
 
-  _parseEpisodeCards(html, animeId) {
+  // titlePrefix should be slugifyTitle(seriesTitle), e.g. "one-piece" for "One Piece".
+  // Episode slugs follow `${titlePrefix}-saison-N-episode-M` so we filter via this exact pattern.
+  // Works on both layouts: /episodes/ uses <article class="poster">, /episodes/?s=… uses <div class="result-item">.
+  _parseEpisodeCards(html, titlePrefix) {
     const episodes = [];
     const seen = new Set();
+    const filterRe = titlePrefix
+      ? new RegExp(`^${titlePrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-saison-\\d+-episode-\\d+$`, 'i')
+      : null;
 
-    const re = /class="poster"[^>]*>([\s\S]*?)<\/article>/gi;
-    for (const m of matchAll(html, re)) {
-      const card = m[0];
-      const hrefM = card.match(/href="([^"]*\/episodes\/[^"]+)"/i);
-      if (!hrefM) continue;
-      const epSlug = episodeSlugFromUrl(hrefM[1]);
+    // Extract every episode link on the page — works regardless of wrapper class.
+    // We rely on the slug pattern itself for filtering, which is more robust than
+    // matching outer divs (jetanimes ships at least 2 different layouts).
+    const linkRe = /href="(https?:\/\/[^"]*\/episodes\/[^"\/]+)\/?"/gi;
+    for (const m of matchAll(html, linkRe)) {
+      const href = m[1];
+      const epSlug = episodeSlugFromUrl(href);
       if (!epSlug || seen.has(epSlug)) continue;
 
-      // Filter to only episodes belonging to this series
-      if (animeId && !epSlug.startsWith(animeId)) continue;
+      // Strict filter: only episodes that match `${titlePrefix}-saison-N-episode-M`
+      if (filterRe && !filterRe.test(epSlug)) continue;
       seen.add(epSlug);
 
       const epNum = episodeNumberFromSlug(epSlug);
       const season = seasonNumberFromSlug(epSlug);
-      const imgM = card.match(/alt="([^"]*)"/i);
-      const title = imgM ? decodeEntities(imgM[1]) : epSlug;
+      // Title is just "Episode N" — no need to dig into the card HTML.
+      const title = `Episode ${epNum ?? episodes.length + 1}`;
 
       episodes.push({
         id: epSlug,
@@ -268,20 +275,28 @@ export class JetAnimesSource {
   // ── Episodes list ────────────────────────────────────────
 
   async getEpisodes(animeId) {
+    // Fetch the series page to get the REAL title — jetanimes URL slugs sometimes
+    // have arbitrary suffixes (e.g. "one-piece-2026", "naruto-shippuden-hd2") that
+    // don't appear in episode slugs. The episode slug pattern is `${slugifyTitle(title)}-saison-N-episode-M`.
+    const info = await this.getAnimeInfo(animeId).catch(() => null);
+    const title = info?.title || animeId;
+    const titlePrefix = slugifyTitle(title);
+    const searchQuery = title; // human-readable title gives better /episodes/?s=… matches
+
     const episodes = [];
     const seen = new Set();
     let page = 1;
 
     while (page <= 30) {
       const url = page === 1
-        ? `${BASE}/episodes/?s=${encodeURIComponent(animeId)}`
-        : `${BASE}/episodes/page/${page}/?s=${encodeURIComponent(animeId)}`;
+        ? `${BASE}/episodes/?s=${encodeURIComponent(searchQuery)}`
+        : `${BASE}/episodes/page/${page}/?s=${encodeURIComponent(searchQuery)}`;
 
       const res = await get(url);
       if (!res.ok) break;
       const html = await res.text();
 
-      const found = this._parseEpisodeCards(html, animeId);
+      const found = this._parseEpisodeCards(html, titlePrefix);
       if (found.length === 0) break;
 
       for (const ep of found) {
@@ -290,7 +305,7 @@ export class JetAnimesSource {
       page++;
     }
 
-    if (episodes.length === 0) throw new Error(`Aucun épisode trouvé pour ${animeId}`);
+    if (episodes.length === 0) throw new Error(`Aucun épisode trouvé pour ${title}`);
 
     // Sort by season then episode number
     episodes.sort((a, b) => (a.season - b.season) || (a.number - b.number));
@@ -323,8 +338,10 @@ export class JetAnimesSource {
     }
     if (sources.length === 0) sources.push({ num: '1', name: 'Server 1' });
 
-    // Try each server to find a direct URL
-    for (const srv of sources) {
+    // Probe every server concurrently: each runs the admin-ajax call then resolves its
+    // embed. Promise.all preserves order, so the picks match a sequential loop — but the
+    // wall-clock cost is a single round-trip instead of the sum of all servers.
+    const attempts = await Promise.all(sources.map(async (srv) => {
       const body = new URLSearchParams({
         action: 'doo_player_ajax',
         post: postId,
@@ -332,7 +349,6 @@ export class JetAnimesSource {
         nume: srv.num,
         type: 'tv',
       });
-
       try {
         const ajaxRes = await fetch(`${BASE}/wp-admin/admin-ajax.php`, {
           method: 'POST',
@@ -345,47 +361,44 @@ export class JetAnimesSource {
           body: body.toString(),
           signal: AbortSignal.timeout(8000),
         });
-        if (!ajaxRes.ok) continue;
+        if (!ajaxRes.ok) return null;
         const data = await ajaxRes.json();
-        if (!data.embed_url) continue;
-
+        if (!data.embed_url) return null;
         const embedUrl = forceHttps(data.embed_url);
         const resolved = await this._resolveVideoUrl(embedUrl, epUrl);
-        if (this._isDirectUrl(resolved.url)) {
-          return {
-            url: resolved.url,
-            sourceUrl: embedUrl,
-            referer: epUrl,
-            headers: { Referer: epUrl },
-            subtitles: [],
-            sources: sources.map(s => ({ name: s.name, url: embedUrl })),
-          };
-        }
+        return { srv, embedUrl, url: resolved.url };
       } catch {
-        continue;
+        return null;
       }
+    }));
+
+    // Keep only servers that returned an embed; expose their distinct URLs for cycling.
+    const valid = attempts.filter(Boolean);
+    const sourcesOut = valid.map((a) => ({ name: a.srv.name, url: a.embedUrl }));
+
+    // Prefer a server that resolved to a direct video URL.
+    const direct = valid.find((a) => this._isDirectUrl(a.url));
+    if (direct) {
+      return {
+        url: direct.url,
+        sourceUrl: direct.embedUrl,
+        referer: epUrl,
+        headers: { Referer: epUrl },
+        subtitles: [],
+        sources: sourcesOut,
+      };
     }
 
-    // No direct URL found — fall back to iframe
-    const fallbackBody = new URLSearchParams({ action: 'doo_player_ajax', post: postId, nonce, nume: '1', type: 'tv' });
-    const fallbackRes = await fetch(`${BASE}/wp-admin/admin-ajax.php`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': UA, 'Referer': epUrl },
-      body: fallbackBody.toString(),
-    }).catch(() => null);
-
-    if (fallbackRes?.ok) {
-      const data = await fallbackRes.json().catch(() => null);
-      if (data?.embed_url) {
-        return {
-          type: 'iframe',
-          url: forceHttps(data.embed_url),
-          referer: epUrl,
-          headers: { Referer: epUrl },
-          subtitles: [],
-          sources: [{ name: 'Server 1', url: forceHttps(data.embed_url) }],
-        };
-      }
+    // No direct URL — fall back to the first working embed in iframe mode.
+    if (valid.length > 0) {
+      return {
+        type: 'iframe',
+        url: valid[0].embedUrl,
+        referer: epUrl,
+        headers: { Referer: epUrl },
+        subtitles: [],
+        sources: sourcesOut,
+      };
     }
 
     throw new Error(`Aucune source vidéo trouvée pour ${episodeId}`);

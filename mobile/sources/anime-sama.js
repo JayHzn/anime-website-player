@@ -158,49 +158,77 @@ export class AnimeSamaSource {
     if (!res.ok) return [];
     const html = await res.text();
 
-    // Only keep cards from the FIRST day section ("Sorties du [today]")
-    const firstDayIdx = html.indexOf('Sorties du');
-    const secondDayIdx = html.indexOf('Sorties du', firstDayIdx + 10);
-    const todaySection = secondDayIdx > 0 ? html.slice(firstDayIdx, secondDayIdx) : html.slice(firstDayIdx);
+    // Collect every "Sorties du [Day] - DD/MM" section, filter to past+today, sort newest-first.
+    const sections = this._collectDaySections(html);
 
     const results = [];
     const seen = new Set();
     const cardRe = /<div[^>]*class="[^"]*anime-card-premium[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>\s*<\/a>\s*<\/div>/gi;
 
-    for (const m of matchAll(todaySection, cardRe)) {
-      const card = m[0];
+    for (const section of sections) {
+      for (const m of matchAll(section, cardRe)) {
+        const card = m[0];
 
-      const linkM = card.match(/<a[^>]*href="([^"]*)"[^>]*/i);
-      const href = linkM ? linkM[1] : '';
-      const slug = slugFromUrl(href);
-      if (!slug) continue;
-      const langM = card.match(/anime-card-premium[^"]*\s+Anime\s+(VF|VOSTFR)/i);
-      const lang = langM ? langM[1].toUpperCase() : '';
-      const dedupKey = `${slug}|${lang}`;
-      if (seen.has(dedupKey)) continue;
-      seen.add(dedupKey);
+        const linkM = card.match(/<a[^>]*href="([^"]*)"[^>]*/i);
+        const href = linkM ? linkM[1] : '';
+        const slug = slugFromUrl(href);
+        if (!slug) continue;
+        const langM = card.match(/anime-card-premium[^"]*\s+Anime\s+(VF|VOSTFR)/i);
+        const lang = langM ? langM[1].toUpperCase() : '';
+        const dedupKey = `${slug}|${lang}`;
+        if (seen.has(dedupKey)) continue;
+        seen.add(dedupKey);
 
-      const titleM = card.match(/<h2[^>]*class="card-title[^"]*"[^>]*>([\s\S]*?)<\/h2>/i);
-      const baseTitle = titleM ? decodeEntities(stripTags(titleM[1])) : slug;
-      const title = lang ? `${baseTitle} (${lang})` : baseTitle;
+        const titleM = card.match(/<h2[^>]*class="card-title[^"]*"[^>]*>([\s\S]*?)<\/h2>/i);
+        const baseTitle = titleM ? decodeEntities(stripTags(titleM[1])) : slug;
+        const title = lang ? `${baseTitle} (${lang})` : baseTitle;
 
-      const imgM = card.match(/<img[^>]*class="card-image[^"]*"[^>]*src="([^"]*)"[^>]*/i);
-      const cover = imgM ? imgM[1] : `${COVER_BASE}/${slug}.jpg`;
+        const imgM = card.match(/<img[^>]*class="card-image[^"]*"[^>]*src="([^"]*)"[^>]*/i);
+        const cover = imgM ? imgM[1] : `${COVER_BASE}/${slug}.jpg`;
 
-      const seasonM = card.match(/<span[^>]*class="info-text"[^>]*>Saison\s*(\d+)/i);
-      const seasonNum = seasonM ? parseInt(seasonM[1]) : null;
+        const seasonM = card.match(/<span[^>]*class="info-text"[^>]*>Saison\s*(\d+)/i);
+        const seasonNum = seasonM ? parseInt(seasonM[1]) : null;
 
-      results.push({
-        id: slug,
-        title,
-        cover,
-        type: 'Anime',
-        latestEpisode: seasonNum,
-        latestEpisodeId: null,
-        source: 'anime-sama',
-      });
+        results.push({
+          id: slug,
+          title,
+          cover,
+          type: 'Anime',
+          latestEpisode: seasonNum,
+          latestEpisodeId: null,
+          source: 'anime-sama',
+        });
+      }
     }
     return results;
+  }
+
+  // Returns each "Sorties du [Day] - DD/MM" section that is today or past, newest-first.
+  _collectDaySections(html) {
+    const sectionStarts = [];
+    const headerRe = /Sorties du [A-Za-zé]+ - (\d{2})\/(\d{2})/g;
+    let m;
+    while ((m = headerRe.exec(html)) !== null) {
+      sectionStarts.push({ idx: m.index, day: parseInt(m[1]), month: parseInt(m[2]) });
+    }
+    if (sectionStarts.length === 0) return [];
+
+    const today = new Date();
+    const todayKey = today.getMonth() * 31 + today.getDate();
+
+    const sections = sectionStarts.map((s, i) => {
+      const next = sectionStarts[i + 1];
+      const sectionHtml = next ? html.slice(s.idx, next.idx) : html.slice(s.idx);
+      const ordinal = (s.month - 1) * 31 + s.day;
+      let isFuture = ordinal > todayKey;
+      if (ordinal === todayKey + 1 && today.getHours() >= 22) isFuture = false;
+      return { sectionHtml, ordinal, isFuture };
+    });
+
+    return sections
+      .filter((s) => !s.isFuture)
+      .sort((a, b) => b.ordinal - a.ordinal)
+      .map((s) => s.sectionHtml);
   }
 
   // ── Season anime ─────────────────────────────────────────
@@ -255,6 +283,27 @@ export class AnimeSamaSource {
 
   // ── Episodes list ────────────────────────────────────────
 
+  // Detects placeholder URLs (templates with no real ID).
+  _isValidEpUrl(url) {
+    if (!url || typeof url !== 'string') return false;
+    const u = url.replace(/\.(html|php)$/i, '');
+    const idx = Math.max(u.lastIndexOf('='), u.lastIndexOf('#'), u.lastIndexOf('/'), u.lastIndexOf('-'));
+    if (idx < 0) return false;
+    const id = u.slice(idx + 1);
+    return /[a-zA-Z0-9]{3,}/.test(id);
+  }
+
+  _parseAllEpsArrays(js) {
+    const arrays = [];
+    const epsArrRe = /var\s+eps\d+\s*=\s*\[([\s\S]*?)\];/g;
+    let m;
+    while ((m = epsArrRe.exec(js)) !== null) {
+      const urls = [...m[1].matchAll(/['"]([^'"]+)['"]/g)].map((x) => x[1]);
+      arrays.push(urls);
+    }
+    return arrays;
+  }
+
   async getEpisodes(animeId) {
     const info = await this.getAnimeInfo(animeId);
     const seasons = info.seasons || [];
@@ -276,13 +325,13 @@ export class AnimeSamaSource {
         if (!res.ok) continue;
         const js = await res.text();
 
-        const epsM = js.match(/var\s+eps1\s*=\s*\[([\s\S]*?)\];/);
-        if (!epsM) continue;
+        const arrays = this._parseAllEpsArrays(js);
+        if (arrays.length === 0) continue;
 
-        const urlMatches = epsM[1].match(/'[^']+'/g) || epsM[1].match(/"[^"]+"/g) || [];
-        const count = urlMatches.length;
-
-        for (let i = 0; i < count; i++) {
+        const maxLen = Math.max(...arrays.map((a) => a.length));
+        for (let i = 0; i < maxLen; i++) {
+          const hasValid = arrays.some((arr) => this._isValidEpUrl(arr[i]));
+          if (!hasValid) continue;
           const epNum = i + 1;
           episodes.push({
             id: `${animeId}/${seasonUrl}/${epNum}`,
@@ -327,7 +376,9 @@ export class AnimeSamaSource {
       }
 
       if (urls.length >= epNum) {
-        const url = forceHttps(urls[epNum - 1]);
+        const rawUrl = urls[epNum - 1];
+        if (!this._isValidEpUrl(rawUrl)) continue;
+        const url = forceHttps(rawUrl);
         const hostName = this._getHostName(url);
         sources.push({ name: `${hostName} (${varName})`, url });
       }

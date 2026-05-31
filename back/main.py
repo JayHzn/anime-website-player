@@ -68,6 +68,7 @@ class ProgressUpdate(BaseModel):
     anime_cover: Optional[str] = None
     source: str
     episode_number: int
+    episode_id: Optional[str] = None  # the source-specific episode slug/path
     total_episodes: Optional[int] = None
     timestamp: float = 0  # position in seconds within the episode
 
@@ -209,6 +210,7 @@ def update_progress(data: ProgressUpdate, request: Request):
         anime_cover=data.anime_cover,
         source=data.source,
         episode_number=data.episode_number,
+        episode_id=data.episode_id,
         total_episodes=data.total_episodes,
         timestamp=data.timestamp,
         user_id=_get_user_id(request),

@@ -1,9 +1,16 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import {
   Play, Pause, Volume2, VolumeX, Maximize, Minimize,
-  SkipForward, SkipBack, ChevronLeft, Settings, RefreshCw,
+  SkipForward, SkipBack, ChevronLeft, Settings, RefreshCw, PictureInPicture2,
 } from 'lucide-react';
 import Hls from 'hls.js';
+import { hlsProxyUrl } from '../api';
+
+// Concurrent extraction: probe several embeds at once in hidden iframes and keep
+// the first that yields a playable URL. Cuts time-to-first-source dramatically vs
+// trying one embed at a time.
+const EXTRACT_CONCURRENCY = 3;
+const EXTRACT_TIMEOUT_MS = 10000;
 
 export default function VideoPlayer({
   videoData,
@@ -42,10 +49,12 @@ export default function VideoPlayer({
   const [visibleIframeUrl, setVisibleIframeUrl] = useState(null); // iframe shown to user (fallback)
   const [iframeLoaded, setIframeLoaded] = useState(false);
   const [sourcesExhausted, setSourcesExhausted] = useState(false); // all embed sources failed
-  // Iframe URL extraction: load embed in hidden iframe, content script extracts direct URL
-  const [extractUrl, setExtractUrl] = useState(null);    // URL in hidden iframe
+  // Iframe URL extraction: load N embeds in hidden iframes, content script extracts the direct URL
+  const [extractUrls, setExtractUrls] = useState([]);    // embeds currently being probed (hidden iframes)
   const [extractedUrl, setExtractedUrl] = useState(null); // extracted direct video URL
   const extractTimerRef = useRef(null);
+  const extractionWonRef = useRef(false); // latch: a candidate already won this batch (ignore late messages)
+  const activeEmbedUrlRef = useRef(null); // embed page currently extracted from (Referer for proxy fallback)
   // Source cycling: when a source fails, try the next one
   const embedQueueRef = useRef([]); // remaining embed URLs to try
   const skipDismissed = useRef(new Set());
@@ -63,8 +72,10 @@ export default function VideoPlayer({
     setVisibleIframeUrl(null);
     setIframeLoaded(false);
     setSourcesExhausted(false);
-    setExtractUrl(null);
+    setExtractUrls([]);
     setExtractedUrl(null);
+    extractionWonRef.current = false;
+    activeEmbedUrlRef.current = null; // forget the previous episode's embed Referer
     clearTimeout(extractTimerRef.current);
     skipDismissed.current.clear();
     // Build the embed URL queue for source cycling.
@@ -90,12 +101,13 @@ export default function VideoPlayer({
   // Start iframe extraction for all iframe-mode sources
   useEffect(() => {
     if (!isIframe) return;
-    startNextExtraction();
+    startExtractionBatch();
   }, [isIframe, videoData?.url]);
 
-  // Try the next embed URL from the queue via extraction.
-  // Called on: iframe mode start, or when a source fails to play.
-  function startNextExtraction() {
+  // Probe the next batch of embeds (up to EXTRACT_CONCURRENCY) in parallel hidden
+  // iframes. The first to emit a playable URL wins (handled by the message listener).
+  // Called on: iframe-mode start, or when a source fails to play.
+  function startExtractionBatch() {
     const queue = embedQueueRef.current;
     if (queue.length === 0) {
       // All sources exhausted — show error state
@@ -104,16 +116,20 @@ export default function VideoPlayer({
       setIsLoading(false);
       return;
     }
-    const [next, ...rest] = queue;
-    embedQueueRef.current = rest;
+    const batch = queue.slice(0, EXTRACT_CONCURRENCY);
+    embedQueueRef.current = queue.slice(batch.length);
+    extractionWonRef.current = false;
+    activeEmbedUrlRef.current = batch[0]; // best-guess Referer until a winner reports its own
     setExtractedUrl(null);
-    setExtractUrl(next);
+    setExtractUrls(batch);
     clearTimeout(extractTimerRef.current);
     extractTimerRef.current = setTimeout(() => {
-      // Extraction timed out — show this embed as a visible iframe
-      setVisibleIframeUrl(next);
-      setExtractUrl(null);
-    }, 8000);
+      // Whole batch timed out with no extraction — surface the first embed as a
+      // visible iframe so the user can clear a challenge (e.g. CF Turnstile).
+      if (extractionWonRef.current) return;
+      setVisibleIframeUrl(batch[0]);
+      setExtractUrls([]);
+    }, EXTRACT_TIMEOUT_MS);
   }
 
   // Called when a resolved URL (direct or extracted) fails to play.
@@ -122,32 +138,37 @@ export default function VideoPlayer({
     if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
     clearTimeout(extractTimerRef.current);
     setExtractedUrl(null);
-    setExtractUrl(null);
+    setExtractUrls([]);
     setVisibleIframeUrl(null);
     setIframeLoaded(false);
     setSourcesExhausted(false);
     setIsLoading(false);
-    startNextExtraction();
+    startExtractionBatch();
   }
 
   // Listen for the extracted URL from the content script.
-  // Active for both the hidden iframe (extractUrl) and visible iframe (visibleIframeUrl),
+  // Active while any hidden probe (extractUrls) or the visible iframe is mounted,
   // so that a URL received after a timeout (e.g. Vidmoly CF Turnstile passed by user)
   // still switches us back to the native player.
   useEffect(() => {
-    if (!extractUrl && !visibleIframeUrl) return;
+    if (extractUrls.length === 0 && !visibleIframeUrl) return;
     function onMessage(e) {
       if (e.data?.type !== 'ANIME_EXT_VIDEO_URL') return;
       const url = e.data.url;
       if (!url) return;
+      // First valid candidate of the batch wins; ignore the losing probes' late messages.
+      if (extractionWonRef.current) return;
+      extractionWonRef.current = true;
       clearTimeout(extractTimerRef.current);
+      // The extractor reports the embed page it ran in — the upstream Referer for proxying.
+      if (e.data.referer) activeEmbedUrlRef.current = e.data.referer;
       setVisibleIframeUrl(null); // leave visible iframe → native player takes over
       setExtractedUrl(url);
-      setExtractUrl(null);
+      setExtractUrls([]);        // tear down all probe iframes
     }
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [extractUrl, visibleIframeUrl]);
+  }, [extractUrls, visibleIframeUrl]);
 
   // Setup HLS or native video (only for direct video URLs)
   useEffect(() => {
@@ -166,54 +187,80 @@ export default function VideoPlayer({
     setIsLoading(true);
     setVideoError(null);
 
-    const handleError = () => {
-      console.log('[player] Video failed, trying next source');
+    // Upstream Referer the host expects (the embed page we extracted from, or the
+    // server-resolved source/referer). Used when we fall back to the backend proxy.
+    const referer = activeEmbedUrlRef.current || videoData?.sourceUrl || videoData?.referer || '';
+    const isHlsContent = activeUrl.includes('.m3u8');
+    let triedProxy = false;
+    let destroyed = false;
+    let mediaOnReady = null;
+    let mediaOnError = null;
+
+    const onReady = () => {
+      if (destroyed) return;
+      setIsLoading(false);
+      if (initialTime > 0) {
+        video.currentTime = initialTime;
+        appliedInitialTime.current = true;
+      }
+      video.play().catch(() => {});
+    };
+
+    const detachMedia = () => {
+      if (mediaOnReady) video.removeEventListener('loadeddata', mediaOnReady);
+      if (mediaOnError) video.removeEventListener('error', mediaOnError);
+      mediaOnReady = null;
+      mediaOnError = null;
+    };
+
+    // A playback attempt failed. First failure on a direct http(s) URL → replay the
+    // SAME stream through the backend proxy (correct Referer/Origin, fixes CORS &
+    // hotlink). Only once the proxied attempt also fails do we advance to the next source.
+    const onFail = (reason) => {
+      if (destroyed) return;
+      if (!triedProxy && /^https?:\/\//i.test(activeUrl)) {
+        triedProxy = true;
+        console.log('[player] direct play failed, retrying via proxy:', reason);
+        load(hlsProxyUrl(activeUrl, referer));
+        return;
+      }
+      console.log('[player] source failed, trying next:', reason);
       tryNextSource();
     };
 
-    // Use proxy URL if available (production), otherwise direct URL
-    const hlsUrl = extractedUrl || videoData.proxy_url || videoData.url;
-
-    const isHls = hlsUrl.includes('.m3u8') || hlsUrl.startsWith('/proxy/hls/');
-    if (isHls && Hls.isSupported()) {
-      const hls = new Hls();
-      hls.loadSource(hlsUrl);
-      hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        setIsLoading(false);
-        if (initialTime > 0) {
-          video.currentTime = initialTime;
-          appliedInitialTime.current = true;
-        }
-        video.play().catch(() => {});
-      });
-      hls.on(Hls.Events.ERROR, (e, data) => {
-        console.error('HLS error:', data);
-        if (data.fatal) {
-          console.log('[player] HLS fatal error, trying next source');
-          tryNextSource();
-        }
-      });
-      hlsRef.current = hls;
-    } else {
-      video.src = videoData.url;
-      video.addEventListener('loadeddata', () => {
-        setIsLoading(false);
-        if (initialTime > 0) {
-          video.currentTime = initialTime;
-          appliedInitialTime.current = true;
-        }
-        video.play().catch(() => {});
-      });
-      video.addEventListener('error', handleError);
+    function load(url) {
+      if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
+      detachMedia();
+      // Decide the engine by the CONTENT (m3u8), not the URL — a proxied mp4 still
+      // contains "/proxy/hls/" but must use the native player, not hls.js.
+      if (isHlsContent && Hls.isSupported()) {
+        const hls = new Hls();
+        hlsRef.current = hls;
+        hls.loadSource(url);
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, onReady);
+        hls.on(Hls.Events.ERROR, (_e, data) => {
+          if (data.fatal) onFail(`hls:${data.details}`);
+        });
+      } else {
+        // Direct mp4/webm, native HLS on Safari, or a proxied stream.
+        mediaOnReady = onReady;
+        mediaOnError = () => onFail('media');
+        video.addEventListener('loadeddata', mediaOnReady);
+        video.addEventListener('error', mediaOnError);
+        video.src = url;
+      }
     }
 
+    load(activeUrl);
+
     return () => {
+      destroyed = true;
+      detachMedia();
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
       }
-      video.removeEventListener('error', handleError);
     };
   }, [videoData?.url, extractedUrl]);
 
@@ -273,6 +320,11 @@ export default function VideoPlayer({
           break;
         case 'f':
           toggleFullscreen();
+          break;
+        case 'p':
+        case 'i':
+          e.preventDefault();
+          togglePiP();
           break;
         case 'ArrowLeft':
           video.currentTime -= 10;
@@ -378,6 +430,25 @@ export default function VideoPlayer({
       setIsFullscreen(false);
     }
     // Remove focus from button so keyboard shortcuts work immediately
+    document.activeElement?.blur();
+    resetHideTimer();
+  };
+
+  // Picture-in-Picture support — only available for the native <video> player.
+  // Iframe-mode embeds run in third-party origins and can't be PiP'd by us.
+  const supportsPiP = typeof document !== 'undefined' && document.pictureInPictureEnabled;
+  const togglePiP = async () => {
+    const video = videoRef.current;
+    if (!video || !supportsPiP) return;
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+      } else {
+        await video.requestPictureInPicture();
+      }
+    } catch (e) {
+      console.warn('[player] PiP toggle failed:', e);
+    }
     document.activeElement?.blur();
     resetHideTimer();
   };
@@ -496,17 +567,21 @@ export default function VideoPlayer({
     );
   }
 
-  // ── Extraction in progress: hidden iframe for any source cycling, not just initial iframe mode ──
-  if (!extractedUrl && extractUrl) {
+  // ── Extraction in progress: parallel hidden iframes race to extract a direct URL ──
+  if (!extractedUrl && extractUrls.length > 0) {
     return (
       <div ref={containerRef} className="relative w-full h-full bg-black">
-        {/* Hidden iframe — content script will extract the video URL */}
-        <iframe
-          key={extractUrl}
-          src={extractUrl}
-          className="absolute w-0 h-0 opacity-0 pointer-events-none"
-          allow="autoplay; encrypted-media"
-        />
+        {/* Hidden probe iframes — the content script extracts the video URL from each;
+            the first to report a playable URL wins (see message listener). */}
+        {extractUrls.map((u) => (
+          <iframe
+            key={u}
+            src={u}
+            title={`extraction-probe-${u}`}
+            className="absolute w-0 h-0 opacity-0 pointer-events-none"
+            allow="autoplay; encrypted-media"
+          />
+        ))}
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black z-10 pointer-events-none">
           <div className="w-10 h-10 border-2 border-white/10 border-t-accent-primary rounded-full animate-spin" />
           <p className="text-white/40 text-sm">Chargement du lecteur...</p>
@@ -891,11 +966,23 @@ export default function VideoPlayer({
                 </button>
               )}
 
+              {/* Picture-in-Picture — only when a native <video> element is in use */}
+              {!isMobileApp && supportsPiP && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); togglePiP(); }}
+                  className="p-2 rounded-lg hover:bg-white/10 transition"
+                  title="Picture-in-Picture (P)"
+                >
+                  <PictureInPicture2 className="w-4 h-4 text-white" />
+                </button>
+              )}
+
               {/* Fullscreen — hidden on mobile app (already fullscreen) */}
               {!isMobileApp && (
                 <button
                   onClick={(e) => { e.stopPropagation(); toggleFullscreen(); }}
                   className="p-2 rounded-lg hover:bg-white/10 transition"
+                  title="Plein écran (F)"
                 >
                   {isFullscreen
                     ? <Minimize className="w-4 h-4 text-white" />

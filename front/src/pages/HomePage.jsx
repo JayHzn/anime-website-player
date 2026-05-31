@@ -31,6 +31,13 @@ function SourceList() {
           <span className="text-white/25 text-xs ml-2">jetanimes.com</span>
         </div>
       </div>
+      <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/5">
+        <div className="w-8 h-8 rounded-lg bg-blue-500/15 flex items-center justify-center text-blue-400 font-bold text-xs">FR</div>
+        <div>
+          <span className="text-white/70 text-sm font-medium">FRAnime</span>
+          <span className="text-white/25 text-xs ml-2">franime.fr</span>
+        </div>
+      </div>
     </div>
   );
 }
@@ -474,7 +481,9 @@ export default function HomePage() {
                           setResumingId(p.anime_id);
                           try {
                             const eps = await api.getEpisodes(p.source, p.anime_id);
-                            const ep = eps.find((e) => e.number === p.episode_number) || eps[0];
+                            // Prefer episode_id (exact across seasons); fall back to number only if id is missing.
+                            let ep = p.episode_id ? eps.find((e) => e.id === p.episode_id) : null;
+                            if (!ep) ep = eps.find((e) => e.number === p.episode_number) || eps[0];
                             if (ep) {
                               sessionStorage.setItem('currentAnime', JSON.stringify({
                                 animeId: p.anime_id,

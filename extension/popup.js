@@ -1,6 +1,6 @@
 // Popup: source selector for Shinani extension (dropdown version)
 
-const SOURCES = new Set(['anime-sama', 'vostfree', 'jetanimes']);
+const SOURCES = new Set(['anime-sama', 'vostfree', 'jetanimes', 'franime']);
 
 async function getSelectedSource() {
   const result = await chrome.storage.local.get('selectedSource');

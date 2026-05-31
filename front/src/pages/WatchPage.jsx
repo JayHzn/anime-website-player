@@ -22,6 +22,7 @@ export default function WatchPage() {
   const [error, setError] = useState(null);
   const [skipSegments, setSkipSegments] = useState(null);
   const [savedTime, setSavedTime] = useState(0);
+  const prefetchedNextRef = useRef(false); // next-episode video URL prefetched once near the end
 
   // Get anime context from sessionStorage
   const [animeCtx] = useState(() => {
@@ -48,13 +49,18 @@ export default function WatchPage() {
   useEffect(() => {
     loadVideo();
     setSavedTime(0);
-    // Fetch saved timestamp — only resume if it's the same episode
+    prefetchedNextRef.current = false;
+    // Fetch saved timestamp — only resume if it's the same episode.
+    // Match by episode_id when present (works across seasons); fall back to episode_number
+    // for legacy progress rows saved before episode_id was tracked.
     if (animeCtx.animeId) {
       api.getAnimeProgress(animeCtx.animeId)
         .then((p) => {
-          if (p?.timestamp > 0 && p.episode_number === epNumber) {
-            setSavedTime(p.timestamp);
-          }
+          if (!p?.timestamp || p.timestamp <= 0) return;
+          const sameEpisode = p.episode_id
+            ? p.episode_id === episodeId
+            : p.episode_number === epNumber;
+          if (sameEpisode) setSavedTime(p.timestamp);
         })
         .catch(() => {});
     }
@@ -112,6 +118,15 @@ export default function WatchPage() {
   const epNumber = currentEpisode?.number || animeCtx.episodeNumber || extractEpisodeNumber(episodeId);
   const handleTimeUpdate = useCallback(
     (time) => {
+      // Prefetch the next episode's video URL once we're near the end, so autoplay is
+      // instant. api.getVideoUrl consumes this cache. Done late to keep tokens fresh.
+      if (nextEpisode && !prefetchedNextRef.current) {
+        const v = document.querySelector('video');
+        if (v?.duration && time > v.duration - 75) {
+          prefetchedNextRef.current = true;
+          api.prefetchVideoUrl(source, nextEpisode.id).catch(() => {});
+        }
+      }
       if (!animeCtx.animeId) return;
       api.updateProgress({
         anime_id: animeCtx.animeId,
@@ -119,11 +134,12 @@ export default function WatchPage() {
         anime_cover: animeCtx.cover,
         source: animeCtx.source,
         episode_number: epNumber,
+        episode_id: episodeId,  // source-specific slug, lets the anime page mark exactly the right episode across seasons
         total_episodes: animeCtx.totalEpisodes,
         timestamp: time,
       });
     },
-    [animeCtx, epNumber]
+    [animeCtx, epNumber, nextEpisode, source, episodeId]
   );
 
   // Go to previous episode

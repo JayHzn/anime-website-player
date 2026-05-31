@@ -145,7 +145,22 @@ export default function AnimePage() {
     navigate(`/watch/${source}/${episode.id}`);
   }
 
-  const currentEp = progress?.episode_number || 0;
+  // Find the index of the currently-watched episode.
+  // Prefer episode_id (works across multi-season anime); fall back to episode_number for
+  // legacy progress entries saved before episode_id was stored.
+  let currentIndex = -1;
+  if (progress?.episode_id) {
+    currentIndex = episodes.findIndex((e) => e.id === progress.episode_id);
+  }
+  if (currentIndex < 0 && progress?.episode_number > 0) {
+    // Legacy fallback: match by number, but only when there's a SINGLE season —
+    // otherwise the same number exists in multiple seasons and the match is ambiguous.
+    const seasonCount = new Set(episodes.map((e) => e.season || '')).size;
+    if (seasonCount <= 1) {
+      currentIndex = episodes.findIndex((e) => e.number === progress.episode_number);
+    }
+  }
+  const currentEpNumber = currentIndex >= 0 ? episodes[currentIndex].number : 0;
   const title = animeInfo?.title || animeId;
   const hasCover = Boolean(animeInfo?.cover?.trim());
   const showPlaceholder = !hasCover || coverError || (hasCover && !coverLoaded);
@@ -259,16 +274,13 @@ export default function AnimePage() {
               )}
 
               {/* Resume button */}
-              {progress && progress.episode_number > 0 && (
+              {currentIndex >= 0 && (
                 <button
-                  onClick={() => {
-                    const ep = episodes.find((e) => e.number === progress.episode_number);
-                    if (ep) playEpisode(ep);
-                  }}
+                  onClick={() => playEpisode(episodes[currentIndex])}
                   className="mt-5 flex items-center gap-2 px-5 py-2.5 rounded-xl bg-accent-primary text-white font-display font-semibold text-sm hover:bg-accent-glow transition shadow-lg shadow-accent-primary/20"
                 >
                   <Play className="w-4 h-4 fill-white" />
-                  Reprendre Ep. {progress.episode_number}
+                  Reprendre Ep. {currentEpNumber}
                 </button>
               )}
             </div>
@@ -282,8 +294,8 @@ export default function AnimePage() {
           <h2 className="font-display font-bold text-lg text-white mb-4">Épisodes</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
             {episodes.map((ep, i) => {
-              const isWatched = ep.number < currentEp;
-              const isCurrent = ep.number === currentEp;
+              const isWatched = currentIndex >= 0 && i < currentIndex;
+              const isCurrent = currentIndex >= 0 && i === currentIndex;
 
               return (
                 <button

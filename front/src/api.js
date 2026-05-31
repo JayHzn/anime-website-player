@@ -1,5 +1,24 @@
 const BASE = import.meta.env.DEV ? '/api' : '';
 
+// ── HLS proxy helper ────────────────────────────────────────
+// When a direct video URL fails to play cross-origin (CORS or anti-hotlink),
+// we replay it through the backend HLS proxy, which refetches it with the right
+// Referer/Origin and adds permissive CORS headers. See back/main.py:/proxy/hls.
+
+/** UTF-8-safe URL-safe base64 (matches Python's base64.urlsafe_b64decode). */
+function _toBase64Url(str) {
+  const bytes = new TextEncoder().encode(str);
+  let bin = '';
+  for (const b of bytes) bin += String.fromCodePoint(b);
+  return btoa(bin).replaceAll('+', '-').replaceAll('/', '_');
+}
+
+/** Build a backend HLS-proxy URL for `url`, optionally tagging the upstream `referer`. */
+export function hlsProxyUrl(url, referer) {
+  const ref = referer ? `?ref=${_toBase64Url(referer)}` : '';
+  return `${BASE}/proxy/hls/${_toBase64Url(url)}${ref}`;
+}
+
 // ── Extension bridge ────────────────────────────────────────
 
 // Minimum extension version required by this frontend build.
@@ -164,6 +183,18 @@ async function fetchJSON(path) {
   return res.json();
 }
 
+// ── Next-episode prefetch ───────────────────────────────────
+// getVideoUrl resolves embeds (slow). Prefetching the NEXT episode near the end of
+// the current one makes autoplay feel instant. Short TTL because resolved URLs can
+// carry short-lived tokens, so we only prefetch close to when it's needed.
+
+const _videoPrefetch = new Map(); // `${source}|${episodeId}` → { at, promise }
+const VIDEO_PREFETCH_TTL = 120000; // 2 min
+
+function _videoKey(source, episodeId) {
+  return `${source}|${episodeId}`;
+}
+
 // ── Public API ──────────────────────────────────────────────
 
 export const api = {
@@ -177,8 +208,29 @@ export const api = {
   getEpisodes: (source, animeId) =>
     extRequest('getEpisodes', { animeId, source }),
 
-  getVideoUrl: (source, episodeId) =>
-    extRequest('getVideoUrl', { episodeId, source }),
+  getVideoUrl: (source, episodeId) => {
+    // Consume a fresh prefetch if one is in flight / ready for this episode.
+    const key = _videoKey(source, episodeId);
+    const cached = _videoPrefetch.get(key);
+    if (cached && Date.now() - cached.at < VIDEO_PREFETCH_TTL) {
+      _videoPrefetch.delete(key);
+      return cached.promise;
+    }
+    return extRequest('getVideoUrl', { episodeId, source });
+  },
+
+  // Warm the cache for an upcoming episode (fire-and-forget). Failures aren't cached.
+  prefetchVideoUrl: (source, episodeId) => {
+    const key = _videoKey(source, episodeId);
+    const existing = _videoPrefetch.get(key);
+    if (existing && Date.now() - existing.at < VIDEO_PREFETCH_TTL) return existing.promise;
+    const promise = extRequest('getVideoUrl', { episodeId, source }).catch((e) => {
+      _videoPrefetch.delete(key);
+      throw e;
+    });
+    _videoPrefetch.set(key, { at: Date.now(), promise });
+    return promise;
+  },
 
   getLatestEpisodes: (source) =>
     extRequest('getLatestEpisodes', { source }),

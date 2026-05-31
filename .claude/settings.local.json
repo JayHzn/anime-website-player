@@ -50,7 +50,18 @@
       "Bash(powershell -Command \"Get-Command gh -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source\")",
       "Bash(rm -f cover_fetcher.py cache.py)",
       "Bash(rm -f sources/voiranime.py sources/voirdrama.py sources/base.py sources/_example_template.py sources/__init__.py)",
-      "Bash(rmdir sources)"
+      "Bash(rmdir sources)",
+      "Bash(node _franime_inspect.mjs)",
+      "Bash(rm _franime_inspect.mjs)",
+      "Bash(cp /tmp/recherche_chunk.js c:/Users/jason/Documents/Informatique/Projets/anime-website-player/_recherche.js)",
+      "Bash(cat)",
+      "Bash(rm _franime_inspect.mjs _recherche.js)",
+      "Bash(cp /tmp/7931-534b8664ba26f896.js /tmp/franime_chunk.js)",
+      "Bash(grep -aoE '\"[a-zA-Z0-9_/.-]{4,80}\"' /tmp/franime_chunk.js)",
+      "Bash(cp /tmp/7931-534b8664ba26f896.js c:/Users/jason/Documents/Informatique/Projets/anime-website-player/_chunk.js)",
+      "Bash(node -e ' *)",
+      "Bash(grep -aoE 'S=\\\\{[A-Z_]+[^}]{0,300}' /tmp/7931-534b8664ba26f896.js)",
+      "Bash(grep -aoE 'S=\\\\{[^}]{50,1500}\\\\}' /tmp/7931-534b8664ba26f896.js)"
     ]
   }
 }

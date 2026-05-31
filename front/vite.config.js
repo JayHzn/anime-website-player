@@ -12,6 +12,11 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
+      // HLS proxy fallback (back/main.py) — same path in dev and prod
+      '/proxy': {
+        target: process.env.VITE_API_URL || 'http://backend:8000',
+        changeOrigin: true,
+      },
     },
   },
 })

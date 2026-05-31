@@ -17,8 +17,8 @@ const { version: MANIFEST_VERSION } = JSON.parse(
 // ── AVAILABLE_SOURCES ────────────────────────────────────────
 
 describe('AVAILABLE_SOURCES', () => {
-  it('contains exactly the 3 active sources', () => {
-    expect(AVAILABLE_SOURCES).toEqual(['anime-sama', 'vostfree', 'jetanimes']);
+  it('contains exactly the 4 active sources', () => {
+    expect(AVAILABLE_SOURCES).toEqual(['anime-sama', 'vostfree', 'jetanimes', 'franime']);
   });
 
   it('does not contain removed sources', () => {
@@ -104,6 +104,12 @@ describe('handleAction - unknown actions', () => {
   it('throws "Action inconnue" for jetanimes (now implemented)', async () => {
     await expect(
       handleAction('nonexistent', { source: 'jetanimes' }, {})
+    ).rejects.toThrow('Action inconnue');
+  });
+
+  it('throws "Action inconnue" for franime (now implemented)', async () => {
+    await expect(
+      handleAction('nonexistent', { source: 'franime' }, {})
     ).rejects.toThrow('Action inconnue');
   });
 });

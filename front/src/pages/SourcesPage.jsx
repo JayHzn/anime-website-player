@@ -8,6 +8,7 @@ const DESKTOP_SOURCE_META = [
   { id: 'anime-sama',   name: 'Anime-Sama',  initials: 'AS', color: 'indigo',  url: 'anime-sama.to',    lang: 'fr' },
   { id: 'vostfree',     name: 'Vostfree',     initials: 'VF', color: 'emerald', url: 'vostfree.ws',      lang: 'fr' },
   { id: 'jetanimes',    name: 'JetAnimes',    initials: 'JA', color: 'emerald', url: 'jetanimes.com',    lang: 'fr' },
+  { id: 'franime',      name: 'FRAnime',      initials: 'FR', color: 'blue',    url: 'franime.fr',       lang: 'fr' },
 ];
 
 const COLOR_CLASSES = {
