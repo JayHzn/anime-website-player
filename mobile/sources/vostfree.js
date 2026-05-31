@@ -39,6 +39,11 @@ function idFromUrl(url) {
 
 // ── VostfreeSource ───────────────────────────────────────────
 
+// Hosts that build the stream URL at runtime (jwplayer/hls.js): it's never in the static
+// HTML, so a server-side fetch+regex can't find it — go straight to iframe extraction.
+// Hosts that DO expose a direct URL (myvi, sendvid…) are deliberately absent.
+const JS_GATED_HOSTS = /vidmoly|voe|streamtape|uqload|vudeo|sbfull|streamsb|streamz|vidhide|earnvids|fitus|lulu|secured|filemoon/i;
+
 export class VostfreeSource {
 
   // ── Parse anime cards (movie-poster + movie-small layouts) ──
@@ -275,18 +280,24 @@ export class VostfreeSource {
 
     const referer = `${BASE}/${animeId}.html`;
 
-    for (const src of sources) {
-      const resolved = await this._resolveVideoUrl(src.url);
-      if (this._isDirectUrl(resolved.url)) {
-        return {
-          url: resolved.url,
-          sourceUrl: src.url,
-          referer,
-          headers: { Referer: referer },
-          subtitles: [],
-          sources,
-        };
-      }
+    // Resolve every embed concurrently; keep the first (highest-priority) direct URL.
+    const resolvedAll = await Promise.all(
+      sources.map((src) =>
+        this._resolveVideoUrl(src.url)
+          .then((r) => ({ src, url: r.url }))
+          .catch(() => ({ src, url: src.url }))
+      )
+    );
+    const direct = resolvedAll.find((r) => this._isDirectUrl(r.url));
+    if (direct) {
+      return {
+        url: direct.url,
+        sourceUrl: direct.src.url,
+        referer,
+        headers: { Referer: referer },
+        subtitles: [],
+        sources,
+      };
     }
 
     const best = sources[0];
@@ -330,6 +341,7 @@ export class VostfreeSource {
   }
 
   async _resolveVideoUrl(embedUrl) {
+    if (JS_GATED_HOSTS.test(embedUrl)) return { url: forceHttps(embedUrl) };
     try {
       const res = await fetch(embedUrl, {
         headers: { Referer: `${BASE}/`, 'User-Agent': UA },

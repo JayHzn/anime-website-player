@@ -5,25 +5,25 @@ import { WebView } from "react-native-webview";
 import * as ScreenOrientation from "expo-screen-orientation";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { BRIDGE_SCRIPT } from "./bridge";
-import { VoiranimeSource } from "./sources/voiranime";
-import { VoirdramaSource } from "./sources/voirdrama";
 import { AnimeSamaSource } from "./sources/anime-sama";
 import { VostfreeSource } from "./sources/vostfree";
+import { JetAnimesSource } from "./sources/jetanimes";
+import { FRAnimeSource } from "./sources/franime";
 
-// ── Sources ──────────────────────────────────────────────────
+// ── Sources (kept in sync with extension/background.js AVAILABLE_SOURCES) ──
 const sources = {
-  voiranime: new VoiranimeSource(),
-  voirdrama: new VoirdramaSource(),
   "anime-sama": new AnimeSamaSource(),
   "vostfree": new VostfreeSource(),
+  "jetanimes": new JetAnimesSource(),
+  "franime": new FRAnimeSource(),
 };
 
 // ── Source metadata (for the in-app source browser) ──────────
 const SOURCE_META = [
-  { id: "anime-sama",   name: "Anime-Sama",   initials: "AS", color: "indigo",  url: "anime-sama.to",    lang: "fr" },
-  { id: "vostfree",     name: "Vostfree",      initials: "VF", color: "orange",  url: "vostfree.ws",      lang: "fr" },
-  { id: "voiranime",    name: "VoirAnime",     initials: "VA", color: "blue",    url: "voiranime.com",    lang: "fr" },
-  { id: "voirdrama",    name: "VoirDrama",     initials: "VD", color: "purple",  url: "voirdrama.com",    lang: "fr" },
+  { id: "anime-sama",   name: "Anime-Sama",   initials: "AS", color: "indigo",  url: "anime-sama.to",      lang: "fr" },
+  { id: "vostfree",     name: "Vostfree",      initials: "VF", color: "orange",  url: "vostfree.ws",        lang: "fr" },
+  { id: "jetanimes",    name: "JetAnimes",     initials: "JA", color: "emerald", url: "on.jetanimes.com",   lang: "fr" },
+  { id: "franime",      name: "FRAnime",       initials: "FR", color: "blue",    url: "franime.fr",         lang: "fr" },
 ];
 
 const SELECTED_SOURCE_KEY = "animehub_selected_source";
@@ -52,6 +52,27 @@ function setSearchCache(source, query, results) {
     results: [...results],
     at: Date.now(),
   });
+}
+
+// ── Result cache: episodes / anime info (same as extension/background.js) ──
+// Stable, navigation-heavy data — short TTL keeps back-and-forth instant.
+// getVideoUrl is intentionally NOT cached (resolved URLs can carry short-lived tokens).
+const resultCache = new Map();
+const RESULT_CACHE_TTL = 300000; // 5 min
+
+function getCachedResult(key) {
+  const entry = resultCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.at > RESULT_CACHE_TTL) {
+    resultCache.delete(key);
+    return null;
+  }
+  // Deep-clone (JSON, RN-safe) so callers can't mutate the cached value.
+  return JSON.parse(JSON.stringify(entry.value));
+}
+
+function setCachedResult(key, value) {
+  resultCache.set(key, { value: JSON.parse(JSON.stringify(value)), at: Date.now() });
 }
 
 // ── Image proxy (same as extension/background.js) ───────────
@@ -156,11 +177,21 @@ export default function App() {
 
           return results;
         }
-        case "getEpisodes":
-          return await source.getEpisodes(payload.animeId);
+        case "getEpisodes": {
+          const key = `episodes:${sourceName}:${payload.animeId}`;
+          const cached = getCachedResult(key);
+          if (cached) return cached;
+          const episodes = await source.getEpisodes(payload.animeId);
+          setCachedResult(key, episodes);
+          return episodes;
+        }
         case "getAnimeInfo": {
+          const key = `info:${sourceName}:${payload.animeId}`;
+          const cached = getCachedResult(key);
+          if (cached) return cached;
           const info = await source.getAnimeInfo(payload.animeId);
           if (info) info.source = sourceName;
+          setCachedResult(key, info);
           return info;
         }
         case "getLatestEpisodes": {

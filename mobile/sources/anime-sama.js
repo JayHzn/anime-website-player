@@ -42,6 +42,11 @@ function slugFromUrl(url) {
   return m ? m[1] : '';
 }
 
+// Hosts that build the stream URL at runtime (jwplayer/hls.js): it's never in the static
+// HTML, so a server-side fetch+regex can't find it — go straight to iframe extraction.
+// Hosts that DO expose a direct URL (sendvid, f16px…) are deliberately absent.
+const JS_GATED_HOSTS = /vidmoly|voe|streamtape|uqload|vudeo|sbfull|streamsb|streamz|vidhide|earnvids|fitus|lulu|secured|filemoon/i;
+
 // ── AnimeSamaSource ──────────────────────────────────────────
 
 export class AnimeSamaSource {
@@ -392,17 +397,23 @@ export class AnimeSamaSource {
       throw new Error(`No video URL found for episode ${epNum}`);
     }
 
-    for (const src of finalSources) {
-      const resolved = await this._resolveVideoUrl(src.url);
-      if (this._isDirectUrl(resolved.url)) {
-        return {
-          url: resolved.url,
-          referer: src.url,
-          headers: { Referer: src.url },
-          subtitles: [],
-          sources: finalSources,
-        };
-      }
+    // Resolve every embed concurrently; keep the first (highest-priority) direct URL.
+    const resolvedAll = await Promise.all(
+      finalSources.map((src) =>
+        this._resolveVideoUrl(src.url)
+          .then((r) => ({ src, url: r.url }))
+          .catch(() => ({ src, url: src.url }))
+      )
+    );
+    const direct = resolvedAll.find((r) => this._isDirectUrl(r.url));
+    if (direct) {
+      return {
+        url: direct.url,
+        referer: direct.src.url,
+        headers: { Referer: direct.src.url },
+        subtitles: [],
+        sources: finalSources,
+      };
     }
 
     const best = finalSources[0];
@@ -447,6 +458,7 @@ export class AnimeSamaSource {
   }
 
   async _resolveVideoUrl(embedUrl) {
+    if (JS_GATED_HOSTS.test(embedUrl)) return { url: forceHttps(embedUrl) };
     try {
       const res = await fetch(embedUrl, {
         headers: {

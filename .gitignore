@@ -13,4 +13,4 @@ build/
 .env
 .env.local
 
-.zip
+*.zip
