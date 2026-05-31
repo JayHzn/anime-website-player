@@ -1,0 +1,16 @@
+[
+  {
+    "id": 1,
+    "priority": 1,
+    "action": {
+      "type": "modifyHeaders",
+      "requestHeaders": [
+        { "header": "referer", "operation": "set", "value": "https://franime.fr/" }
+      ]
+    },
+    "condition": {
+      "urlFilter": "||api.franime.fr/api/anime/",
+      "resourceTypes": ["xmlhttprequest"]
+    }
+  }
+]

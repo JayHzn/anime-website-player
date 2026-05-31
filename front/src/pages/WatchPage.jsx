@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import VideoPlayer from '../components/VideoPlayer';
+import { formatSeasonEpisode, seasonFromEpisodeId } from '../episode';
 
 /** Extract episode number from an episode ID like "anime-slug/anime-slug-10-vostfr" */
 function extractEpisodeNumber(epId) {
@@ -289,11 +290,17 @@ export default function WatchPage() {
     );
   }
 
+  const episodeLabel = formatSeasonEpisode(
+    currentEpisode?.season ?? seasonFromEpisodeId(episodeId),
+    epNumber
+  );
+
   return (
     <div className="h-screen w-screen bg-black">
       <VideoPlayer
         videoData={videoData}
-        episodeNumber={currentEpisode?.number || animeCtx.episodeNumber || extractEpisodeNumber(episodeId)}
+        episodeNumber={epNumber}
+        episodeLabel={episodeLabel}
         animeTitle={animeCtx.title || 'Anime'}
         initialTime={savedTime}
         onTimeUpdate={handleTimeUpdate}

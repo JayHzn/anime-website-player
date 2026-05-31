@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Clock, Play, Trash2 } from 'lucide-react';
 import { api } from '../api';
+import { seasonFromEpisodeId } from '../episode';
 
 export default function HistoryPage() {
   const [history, setHistory] = useState([]);
@@ -88,9 +89,13 @@ export default function HistoryPage() {
                     </div>
                   </div>
 
-                  {/* Episode badge */}
-                  <div className="absolute top-2 right-2 bg-black/70 backdrop-blur-sm text-[10px] font-semibold text-white/90 px-2 py-0.5 rounded-md">
-                    Ep. {item.episode_number}{item.total_episodes ? ` / ${item.total_episodes}` : ''}
+                  {/* Season · Episode badge */}
+                  <div className="absolute top-2 right-2 bg-black/70 backdrop-blur-sm text-[10px] font-semibold text-white/90 px-2 py-0.5 rounded-md whitespace-nowrap">
+                    {(() => {
+                      const s = seasonFromEpisodeId(item.episode_id);
+                      const base = s ? `S${s} · E${item.episode_number}` : `Ep. ${item.episode_number}`;
+                      return base + (item.total_episodes ? ` / ${item.total_episodes}` : '');
+                    })()}
                   </div>
 
                   {/* Source badge */}

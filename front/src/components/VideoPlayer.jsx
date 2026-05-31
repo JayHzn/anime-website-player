@@ -15,6 +15,7 @@ const EXTRACT_TIMEOUT_MS = 10000;
 export default function VideoPlayer({
   videoData,
   episodeNumber,
+  episodeLabel,
   animeTitle,
   onTimeUpdate,
   onEnded,
@@ -520,7 +521,7 @@ export default function VideoPlayer({
             </button>
             <div>
               <p className="text-white font-display font-semibold text-sm">{animeTitle}</p>
-              <p className="text-white/50 text-xs">Episode {episodeNumber}</p>
+              <p className="text-white/50 text-xs">{episodeLabel || `Épisode ${episodeNumber}`}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -595,7 +596,7 @@ export default function VideoPlayer({
             </button>
             <div>
               <p className="text-white font-display font-semibold text-sm">{animeTitle}</p>
-              <p className="text-white/50 text-xs">Episode {episodeNumber}</p>
+              <p className="text-white/50 text-xs">{episodeLabel || `Épisode ${episodeNumber}`}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">

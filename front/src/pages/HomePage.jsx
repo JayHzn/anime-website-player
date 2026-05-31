@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Link, useOutletContext, useNavigate } from 'react-router-dom';
 import { Play, Clock, Trash2, ChevronLeft, ChevronRight, Flame, Film, Sparkles, Puzzle, MousePointer, RefreshCw, CheckCircle, Download, Monitor, Globe, Zap, ArrowRight } from 'lucide-react';
 import { api, onCoversUpdate, MIN_EXTENSION_VERSION } from '../api';
+import { formatSeasonEpisode, seasonFromEpisodeId } from '../episode';
 
 const EXTENSION_DOWNLOAD_URL = 'https://github.com/JayHzn/anime-website-player/raw/main/extension';
 
@@ -460,7 +461,7 @@ export default function HomePage() {
                       </h3>
                     </Link>
                     <p className="text-xs text-white/40 mt-1">
-                      Episode {p.episode_number}
+                      {formatSeasonEpisode(seasonFromEpisodeId(p.episode_id), p.episode_number)}
                       {p.total_episodes ? ` / ${p.total_episodes}` : ''}
                     </p>
 

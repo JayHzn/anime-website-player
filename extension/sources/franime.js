@@ -1,12 +1,18 @@
 // ── FRAnime source (franime.fr) ────────────────────────────────
 // Next.js SPA backed by a public JSON catalogue at https://api.franime.fr/api.
 // The full catalogue is one big array — we cache it in memory and serve all
-// list/search/info calls from there. For video playback we use an iframe that
-// points at the franime.fr watch page; player-extractor catches the underlying
-// host (sibnet, vidmoly, sendvid, etc.) m3u8 from the nested iframe.
+// list/search/info calls from there. For playback we resolve each lecteur to its
+// real host embed (sibnet/vidmoly/sendvid/…) via the franime "GET_LECTEUR" API and
+// hand those URLs to the player — no need to load franime's own (auth-gated) SPA.
 
 const API = 'https://api.franime.fr/api';
 const SITE = 'https://franime.fr';
+
+function forceHttps(url) {
+  if (!url) return url;
+  if (url.startsWith('//')) return 'https:' + url;
+  return url.replace(/^http:\/\//i, 'https://');
+}
 
 // ── In-memory caches ───────────────────────────────────────────
 const CATALOG_TTL = 15 * 60 * 1000; // 15 min
@@ -142,7 +148,33 @@ function makeId(baseId, lang) {
   return lang === 'vf' ? `${baseId}-vf` : String(baseId);
 }
 
+// The GET_LECTEUR endpoint returns a "watch2/?…&b=…" URL whose `b` param hides the
+// real host embed URL: base64-decode → hex-decode to bytes → XOR every byte with a
+// per-response key. The key isn't sent, but the URL always starts with "h" (https://),
+// so we recover it from the first byte. Returns "" if it doesn't decode to an http URL.
+export function decodeFranimeEmbed(bParam) {
+  let hex;
+  try {
+    hex = atob(decodeURIComponent(bParam));
+  } catch {
+    return '';
+  }
+  const bytes = [];
+  for (let i = 0; i + 1 < hex.length; i += 2) bytes.push(Number.parseInt(hex.slice(i, i + 2), 16));
+  if (bytes.length === 0) return '';
+  const key = bytes[0] ^ 0x68; // 'h'
+  let out = '';
+  for (const b of bytes) out += String.fromCodePoint((b ^ key) & 0xff);
+  return /^https?:\/\//i.test(out) ? out : '';
+}
+
 // ── FRAnimeSource ──────────────────────────────────────────────
+
+// Hosts that build the stream URL at runtime (jwplayer/hls.js): it's never in the static
+// HTML, so a server-side fetch+regex can't find it — go straight to iframe extraction
+// (player-extractor handles all of these in-context). Hosts that DO expose a direct URL —
+// sendvid, f16px, myvi, sibnet… — are deliberately absent so they're still resolved.
+const JS_GATED_HOSTS = /vidmoly|voe|streamtape|uqload|vudeo|sbfull|streamsb|streamz|vidhide|earnvids|fitus|lulu|secured|filemoon/i;
 
 export class FRAnimeSource {
 
@@ -362,29 +394,110 @@ export class FRAnimeSource {
       throw new Error(`Aucun lecteur ${lang.toUpperCase()} disponible pour S${sNum} E${eNum}`);
     }
 
-    // The franime watch page handles CF Turnstile, the GET_LECTEUR call and the
-    // embed iframe insertion. We let it render in a hidden iframe — player-extractor
-    // catches the nested embed (sibnet/vidmoly/sendvid/…) m3u8 and switches to native player.
-    const titleSlug = slugifyTitle(pickTitle(a));
-    const watchUrl =
-      `${SITE}/anime/${titleSlug}?s=${sNum}&ep=${eNum}&lang=${lang}&anime_id=${baseId}`;
+    // Resolve every lecteur to its real host embed URL via the franime API:
+    //   GET /api/anime/{id}/{season0}/{episode0}/{lang}/{lecteur}
+    //     → a "watch2/?…&b=…" URL whose `b` decodes to the embed (sibnet/vidmoly/…).
+    // (season/episode are 0-based on the API; our episodeId is 1-based.)
+    const apiS = sNum - 1;
+    const apiE = eNum - 1;
+    const resolved = await Promise.all(lecteurs.map((name, idx) =>
+      this._resolveLecteurEmbed(baseId, apiS, apiE, lang, idx, name)
+    ));
+    const embeds = resolved.filter(Boolean);
+    if (embeds.length === 0) {
+      throw new Error(`Aucune source vidéo résolue pour S${sNum} E${eNum}`);
+    }
 
-    // One synthetic "source" per lecteur index — VideoPlayer can cycle through them by
-    // appending &lecteur=N. Each cycle reloads the iframe and player-extractor retries.
-    const sources = lecteurs.map((name, idx) => ({
-      name: `${name} (${lang.toUpperCase()})`,
-      url: `${watchUrl}&lecteur=${idx}`,
-    }));
+    // Order by how cleanly our player handles each host.
+    embeds.sort((x, y) => this._hostPriority(x.url) - this._hostPriority(y.url));
+
+    // Try to pull a direct video URL out of each embed (concurrently); keep the first
+    // (highest-priority) that resolves. Otherwise hand the embeds to VideoPlayer, which
+    // extracts them in hidden iframes.
+    const direct = (await Promise.all(embeds.map((src) =>
+      this._resolveVideoUrl(src.url)
+        .then((r) => ({ src, url: r.url }))
+        .catch(() => ({ src, url: src.url }))
+    ))).find((r) => this._isDirectUrl(r.url));
+
+    if (direct) {
+      return {
+        url: direct.url,
+        sourceUrl: direct.src.url,
+        referer: `${SITE}/`,
+        headers: { Referer: `${SITE}/` },
+        subtitles: [],
+        sources: embeds,
+      };
+    }
 
     return {
       type: 'iframe',
-      url: sources[0].url,
-      sourceUrl: sources[0].url,
+      url: embeds[0].url,
+      sourceUrl: embeds[0].url,
       referer: `${SITE}/`,
       headers: { Referer: `${SITE}/` },
       subtitles: [],
-      sources,
+      sources: embeds,
     };
+  }
+
+  // ── Video host helpers ───────────────────────────────────
+
+  // Resolve one lecteur index to { name, url } (decoded embed), or null on failure.
+  async _resolveLecteurEmbed(baseId, apiS, apiE, lang, idx, name) {
+    try {
+      // The API only returns the embed (watch2 + `b`) when the request carries a
+      // franime.fr Referer. fetch() can't set Referer (forbidden header in a service
+      // worker), so a static declarativeNetRequest rule (extension/rules.json) injects
+      // it for every /api/anime/ request.
+      const res = await fetch(`${API}/anime/${baseId}/${apiS}/${apiE}/${lang}/${idx}`, {
+        credentials: 'include',
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!res.ok) return null;
+      const watch2 = (await res.text()).trim();
+      const m = watch2.match(/[?&]b=([^&]+)/);
+      if (!m) return null;
+      const url = decodeFranimeEmbed(m[1]);
+      if (!url) return null;
+      return { name: `${name} (${lang.toUpperCase()})`, url: forceHttps(url) };
+    } catch {
+      return null;
+    }
+  }
+
+  _isDirectUrl(url) {
+    return /\.(m3u8|mp4|webm)(\?|$)/i.test(url || '');
+  }
+
+  _hostPriority(url) {
+    // sendvid: blocks framing but exposes a direct file (resolvable server-side)
+    if (url.includes('sendvid')) return 0;
+    // vidmoly: jwplayer + HLS, extracted cleanly in a hidden iframe
+    if (url.includes('vidmoly')) return 1;
+    // sibnet: extractable in-iframe (player-extractor is injected there)
+    if (url.includes('sibnet')) return 2;
+    if (url.includes('embed4me') || url.includes('lpayer')) return 3;
+    return 5;
+  }
+
+  async _resolveVideoUrl(embedUrl) {
+    if (JS_GATED_HOSTS.test(embedUrl)) return { url: embedUrl };
+    try {
+      const res = await fetch(embedUrl, {
+        signal: AbortSignal.timeout(6000),
+      });
+      if (!res.ok) return { url: embedUrl };
+      const html = await res.text();
+      const m3u8 = html.match(/["'](https?:\/\/[^"']*\.m3u8[^"']*)["']/i);
+      if (m3u8) return { url: forceHttps(m3u8[1]) };
+      const mp4 = html.match(/["'](https?:\/\/[^"']*\.mp4[^"']*)["']/i);
+      if (mp4) return { url: forceHttps(mp4[1]) };
+      return { url: embedUrl };
+    } catch {
+      return { url: embedUrl };
+    }
   }
 
   // ── Covers ───────────────────────────────────────────────

@@ -43,6 +43,12 @@ function slugFromUrl(url) {
 
 // ── AnimeSamaSource ──────────────────────────────────────────
 
+// Hosts that build the stream URL at runtime (jwplayer/hls.js): it's never in the static
+// HTML, so a server-side fetch+regex can't find it — go straight to iframe extraction
+// (player-extractor handles all of these in-context). Hosts that DO expose a direct URL —
+// sendvid, f16px, myvi, sibnet… — are deliberately absent so they're still resolved.
+const JS_GATED_HOSTS = /vidmoly|voe|streamtape|uqload|vudeo|sbfull|streamsb|streamz|vidhide|earnvids|fitus|lulu|secured|filemoon/i;
+
 export class AnimeSamaSource {
 
   // ── Search ───────────────────────────────────────────────
@@ -501,6 +507,7 @@ export class AnimeSamaSource {
   }
 
   async _resolveVideoUrl(embedUrl) {
+    if (JS_GATED_HOSTS.test(embedUrl)) return { url: forceHttps(embedUrl) };
     try {
       const res = await fetch(embedUrl, {
         headers: {
