@@ -119,11 +119,13 @@ export default function WatchPage() {
   const epNumber = currentEpisode?.number || animeCtx.episodeNumber || extractEpisodeNumber(episodeId);
   const handleTimeUpdate = useCallback(
     (time) => {
-      // Prefetch the next episode's video URL once we're near the end, so autoplay is
-      // instant. api.getVideoUrl consumes this cache. Done late to keep tokens fresh.
+      // Pre-warm the next episode at 75% of the current one. The prefetch resolves
+      // the embed URL AND warms the first HLS segments into the browser cache so the
+      // jump to the next episode is instant. Once fired, we don't re-trigger.
       if (nextEpisode && !prefetchedNextRef.current) {
         const v = document.querySelector('video');
-        if (v?.duration && time > v.duration - 75) {
+        const ratio = v?.duration ? time / v.duration : 0;
+        if (ratio > 0.75 || (v?.duration && time > v.duration - 75)) {
           prefetchedNextRef.current = true;
           api.prefetchVideoUrl(source, nextEpisode.id).catch(() => {});
         }
@@ -252,6 +254,12 @@ export default function WatchPage() {
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, [saveProgressNow]);
+
+  // Leaving the player → wipe every video-related cache: in-flight segment fetches,
+  // resolved-URL prefetch map, etc. Frees bandwidth + memory immediately.
+  useEffect(() => {
+    return () => { api.clearVideoPrefetch?.(); };
+  }, []);
 
   const handleBack = () => {
     saveProgressNow();

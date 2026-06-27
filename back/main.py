@@ -2,19 +2,17 @@
 Shinani - Local Anime Streaming Aggregator
 FastAPI Backend
 
-All scraping is handled client-side (browser extension or mobile app).
-The backend only provides: HLS proxy, progress tracking, skip segments.
+All scraping AND video streaming is handled client-side (browser extension or mobile
+app) — the backend never fetches or relays any video stream from a streaming host.
+The backend only provides: progress tracking and OP/ED skip-segment storage.
 """
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
 import asyncio
 import os
-import httpx
-import base64
 
 from db.database import Database
 
@@ -90,93 +88,6 @@ def root():
         from fastapi.responses import FileResponse
         return FileResponse(static_index)
     return {"status": "ok"}
-
-
-# --- HLS Video Proxy ---
-
-_proxy_client: httpx.AsyncClient | None = None
-
-
-def _get_proxy_client() -> httpx.AsyncClient:
-    global _proxy_client
-    if _proxy_client is None or _proxy_client.is_closed:
-        _proxy_client = httpx.AsyncClient(
-            timeout=30,
-            follow_redirects=True,
-            limits=httpx.Limits(max_connections=20),
-        )
-    return _proxy_client
-
-
-@app.get("/proxy/hls/{encoded_url:path}")
-async def proxy_hls(encoded_url: str, ref: str = ""):
-    """
-    Proxy HLS requests (.m3u8 manifests and .ts segments).
-    The server fetches the content with its IP (matching the token)
-    and streams it back to the client.
-    """
-    try:
-        url = base64.urlsafe_b64decode(encoded_url.encode()).decode()
-    except Exception:
-        raise HTTPException(400, "Invalid encoded URL")
-
-    referer = ""
-    if ref:
-        try:
-            referer = base64.urlsafe_b64decode(ref.encode()).decode()
-        except Exception:
-            pass
-
-    headers = {}
-    if referer:
-        headers["Referer"] = referer
-        headers["Origin"] = referer.split("/embed")[0] if "/embed" in referer else referer
-
-    client = _get_proxy_client()
-    try:
-        resp = await client.get(url, headers=headers)
-        if resp.status_code != 200:
-            raise HTTPException(resp.status_code, "Upstream error")
-    except httpx.HTTPError as e:
-        raise HTTPException(502, f"Proxy error: {e}")
-
-    content_type = resp.headers.get("content-type", "application/octet-stream")
-
-    # For .m3u8 manifests, rewrite internal URLs to also go through the proxy
-    if ".m3u8" in url or "mpegurl" in content_type.lower():
-        body = resp.text
-        rewritten = _rewrite_m3u8(body, url, referer)
-        return StreamingResponse(
-            iter([rewritten.encode()]),
-            media_type="application/vnd.apple.mpegurl",
-            headers={"Access-Control-Allow-Origin": "*"},
-        )
-
-    # For .ts segments and other files, stream the bytes
-    return StreamingResponse(
-        iter([resp.content]),
-        media_type=content_type,
-        headers={"Access-Control-Allow-Origin": "*"},
-    )
-
-
-def _rewrite_m3u8(body: str, manifest_url: str, referer: str) -> str:
-    """Rewrite URLs in HLS manifest to go through the proxy."""
-    from urllib.parse import urljoin
-
-    ref_param = f"?ref={base64.urlsafe_b64encode(referer.encode()).decode()}" if referer else ""
-    lines = []
-    for line in body.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            lines.append(line)
-            continue
-        # This is a URL line (segment or sub-playlist)
-        if not line.startswith("http"):
-            line = urljoin(manifest_url, line)
-        encoded = base64.urlsafe_b64encode(line.encode()).decode()
-        lines.append(f"/proxy/hls/{encoded}{ref_param}")
-    return "\n".join(lines)
 
 
 # --- Progress Tracking ---
@@ -284,7 +195,7 @@ if os.path.isdir(STATIC_DIR):
     async def spa_fallback(full_path: str):
         """SPA fallback: serve index.html for all non-API routes."""
         # Don't catch API routes
-        if full_path.startswith(("api/", "episode/", "progress", "ml/", "proxy/")):
+        if full_path.startswith(("api/", "episode/", "progress", "ml/")):
             raise HTTPException(404)
         # Serve actual static files if they exist
         file_path = os.path.join(STATIC_DIR, full_path)

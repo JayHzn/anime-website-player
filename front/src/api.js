@@ -1,24 +1,5 @@
 const BASE = import.meta.env.DEV ? '/api' : '';
 
-// ── HLS proxy helper ────────────────────────────────────────
-// When a direct video URL fails to play cross-origin (CORS or anti-hotlink),
-// we replay it through the backend HLS proxy, which refetches it with the right
-// Referer/Origin and adds permissive CORS headers. See back/main.py:/proxy/hls.
-
-/** UTF-8-safe URL-safe base64 (matches Python's base64.urlsafe_b64decode). */
-function _toBase64Url(str) {
-  const bytes = new TextEncoder().encode(str);
-  let bin = '';
-  for (const b of bytes) bin += String.fromCodePoint(b);
-  return btoa(bin).replaceAll('+', '-').replaceAll('/', '_');
-}
-
-/** Build a backend HLS-proxy URL for `url`, optionally tagging the upstream `referer`. */
-export function hlsProxyUrl(url, referer) {
-  const ref = referer ? `?ref=${_toBase64Url(referer)}` : '';
-  return `${BASE}/proxy/hls/${_toBase64Url(url)}${ref}`;
-}
-
 // ── Extension bridge ────────────────────────────────────────
 
 // Minimum extension version required by this frontend build.
@@ -191,8 +172,61 @@ async function fetchJSON(path) {
 const _videoPrefetch = new Map(); // `${source}|${episodeId}` → { at, promise }
 const VIDEO_PREFETCH_TTL = 120000; // 2 min
 
+// AbortControllers for segment-prefetch fetches. Lets us wipe everything when the
+// user leaves the player ("supprime tout" UX) instead of letting orphan requests
+// chew through bandwidth.
+const _segmentAborters = new Set();
+
 function _videoKey(source, episodeId) {
   return `${source}|${episodeId}`;
+}
+
+// Fetch an m3u8 + the first few segments. The browser's HTTP cache stores them, so
+// when hls.js later requests the same URLs for playback it serves them instantly.
+// This is a no-op for non-HLS URLs (direct mp4) since they need range-fetching anyway.
+async function _warmHlsSegments(masterUrl, segmentCount = 3) {
+  if (!masterUrl || !/\.m3u8(\?|$)/i.test(masterUrl)) return;
+  const aborter = new AbortController();
+  _segmentAborters.add(aborter);
+  try {
+    const fetchOpts = { signal: aborter.signal, mode: 'cors', credentials: 'omit' };
+    const masterRes = await fetch(masterUrl, fetchOpts);
+    if (!masterRes.ok) return;
+    const masterText = await masterRes.text();
+
+    // If it's a master playlist, follow the highest-bandwidth variant first.
+    let mediaUrl = masterUrl;
+    let mediaText = masterText;
+    if (/#EXT-X-STREAM-INF:/i.test(masterText)) {
+      const variants = [];
+      const lines = masterText.split(/\r?\n/);
+      for (let i = 0; i < lines.length; i++) {
+        const m = /BANDWIDTH=(\d+)/i.exec(lines[i]);
+        if (m && lines[i + 1] && !lines[i + 1].startsWith('#')) {
+          variants.push({ bw: Number.parseInt(m[1]), uri: lines[i + 1].trim() });
+        }
+      }
+      if (variants.length === 0) return;
+      variants.sort((a, b) => b.bw - a.bw);
+      mediaUrl = new URL(variants[0].uri, masterUrl).href;
+      const mediaRes = await fetch(mediaUrl, fetchOpts);
+      if (!mediaRes.ok) return;
+      mediaText = await mediaRes.text();
+    }
+
+    // Collect segment URIs (non-comment, non-empty lines) and pre-fetch the first few.
+    const segments = mediaText
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith('#'))
+      .slice(0, segmentCount)
+      .map((u) => new URL(u, mediaUrl).href);
+
+    await Promise.allSettled(segments.map((u) => fetch(u, fetchOpts)));
+  } catch { /* aborted or network — fine, prefetch is best-effort */ }
+  finally {
+    _segmentAborters.delete(aborter);
+  }
 }
 
 // ── Public API ──────────────────────────────────────────────
@@ -219,17 +253,35 @@ export const api = {
     return extRequest('getVideoUrl', { episodeId, source });
   },
 
-  // Warm the cache for an upcoming episode (fire-and-forget). Failures aren't cached.
+  // Warm the cache for an upcoming episode (fire-and-forget): resolve the embed URL
+  // AND prefetch a few HLS segments into the browser's HTTP cache so the next click
+  // starts playing instantly. Failures aren't cached.
   prefetchVideoUrl: (source, episodeId) => {
     const key = _videoKey(source, episodeId);
     const existing = _videoPrefetch.get(key);
     if (existing && Date.now() - existing.at < VIDEO_PREFETCH_TTL) return existing.promise;
-    const promise = extRequest('getVideoUrl', { episodeId, source }).catch((e) => {
+    const promise = extRequest('getVideoUrl', { episodeId, source }).then((data) => {
+      // Best-effort segment warm-up. We don't await it — the URL resolution is what
+      // unblocks the next-click; segment warming continues in the background.
+      const target = data?.url || (data?.sources?.[0]?.url);
+      if (target) _warmHlsSegments(target).catch(() => {});
+      return data;
+    }).catch((e) => {
       _videoPrefetch.delete(key);
       throw e;
     });
     _videoPrefetch.set(key, { at: Date.now(), promise });
     return promise;
+  },
+
+  // Wipe everything: cached promises, in-flight segment fetches. Call from WatchPage
+  // unmount so leaving the player frees memory and network immediately.
+  clearVideoPrefetch: () => {
+    _videoPrefetch.clear();
+    for (const a of _segmentAborters) {
+      try { a.abort(); } catch { /* ignored */ }
+    }
+    _segmentAborters.clear();
   },
 
   getLatestEpisodes: (source) =>

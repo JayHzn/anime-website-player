@@ -4,7 +4,51 @@ import {
   SkipForward, SkipBack, ChevronLeft, Settings, RefreshCw, PictureInPicture2,
 } from 'lucide-react';
 import Hls from 'hls.js';
-import { hlsProxyUrl } from '../api';
+
+// HLS.js config tuned for "watch a single episode through" UX:
+// - Buffer ahead so seek-forward within the episode is instant
+// - Adapt to the user's connection (Network Information API) and device RAM
+//   (Device Memory API) so we don't OOM low-end devices or waste data on slow links.
+// - lowLatencyMode is OFF since we're not streaming live.
+function getHlsConfig() {
+  // ── Network tier ────────────────────────────────────────
+  // navigator.connection is Chromium-only; we fall back to "assume 4G".
+  const conn = (typeof navigator !== 'undefined' && navigator.connection) || {};
+  const effective = conn.effectiveType || '4g';
+  const downlink = typeof conn.downlink === 'number' ? conn.downlink : 10; // Mbps
+  const saveData = Boolean(conn.saveData);
+
+  // ── Device-memory tier (in GB; spec caps at 8) ──────────
+  const deviceMemory = (typeof navigator !== 'undefined' && navigator.deviceMemory) || 4;
+
+  // Pick a base "tier" from network — seconds + MB targets we'd LOVE to buffer.
+  let base;
+  if (saveData || effective === 'slow-2g' || effective === '2g') {
+    base = { ahead: 60, max: 180, behind: 30, mb: 80 };
+  } else if (effective === '3g' || downlink < 3) {
+    base = { ahead: 180, max: 600, behind: 60, mb: 200 };
+  } else if (downlink < 10) {
+    base = { ahead: 360, max: 1800, behind: 90, mb: 400 };
+  } else {
+    base = { ahead: 600, max: 3600, behind: 90, mb: 600 };
+  }
+
+  // Scale by available RAM. Conservative — better to over-shrink than to OOM mobile.
+  // factor ≈ 0.3 (1 GB) → 0.5 (2 GB) → 0.75 (4 GB) → 1.0 (8 GB).
+  const ramFactor = Math.min(1, Math.max(0.3, deviceMemory / 8));
+  const scale = (n) => Math.max(30, Math.round(n * ramFactor));
+
+  return {
+    maxBufferLength: scale(base.ahead),
+    maxMaxBufferLength: scale(base.max),
+    backBufferLength: scale(base.behind),
+    maxBufferSize: Math.round(base.mb * ramFactor) * 1000 * 1000,
+    maxFragLookUpTolerance: 0.25,
+    enableWorker: true,
+    manifestLoadingMaxRetry: 2,
+    fragLoadingMaxRetry: 4,
+  };
+}
 
 // Concurrent extraction: probe several embeds at once in hidden iframes and keep
 // the first that yields a playable URL. Cuts time-to-first-source dramatically vs
@@ -55,7 +99,6 @@ export default function VideoPlayer({
   const [extractedUrl, setExtractedUrl] = useState(null); // extracted direct video URL
   const extractTimerRef = useRef(null);
   const extractionWonRef = useRef(false); // latch: a candidate already won this batch (ignore late messages)
-  const activeEmbedUrlRef = useRef(null); // embed page currently extracted from (Referer for proxy fallback)
   // Source cycling: when a source fails, try the next one
   const embedQueueRef = useRef([]); // remaining embed URLs to try
   const skipDismissed = useRef(new Set());
@@ -76,7 +119,6 @@ export default function VideoPlayer({
     setExtractUrls([]);
     setExtractedUrl(null);
     extractionWonRef.current = false;
-    activeEmbedUrlRef.current = null; // forget the previous episode's embed Referer
     clearTimeout(extractTimerRef.current);
     skipDismissed.current.clear();
     // Build the embed URL queue for source cycling.
@@ -120,7 +162,6 @@ export default function VideoPlayer({
     const batch = queue.slice(0, EXTRACT_CONCURRENCY);
     embedQueueRef.current = queue.slice(batch.length);
     extractionWonRef.current = false;
-    activeEmbedUrlRef.current = batch[0]; // best-guess Referer until a winner reports its own
     setExtractedUrl(null);
     setExtractUrls(batch);
     clearTimeout(extractTimerRef.current);
@@ -161,8 +202,6 @@ export default function VideoPlayer({
       if (extractionWonRef.current) return;
       extractionWonRef.current = true;
       clearTimeout(extractTimerRef.current);
-      // The extractor reports the embed page it ran in — the upstream Referer for proxying.
-      if (e.data.referer) activeEmbedUrlRef.current = e.data.referer;
       setVisibleIframeUrl(null); // leave visible iframe → native player takes over
       setExtractedUrl(url);
       setExtractUrls([]);        // tear down all probe iframes
@@ -188,11 +227,7 @@ export default function VideoPlayer({
     setIsLoading(true);
     setVideoError(null);
 
-    // Upstream Referer the host expects (the embed page we extracted from, or the
-    // server-resolved source/referer). Used when we fall back to the backend proxy.
-    const referer = activeEmbedUrlRef.current || videoData?.sourceUrl || videoData?.referer || '';
     const isHlsContent = activeUrl.includes('.m3u8');
-    let triedProxy = false;
     let destroyed = false;
     let mediaOnReady = null;
     let mediaOnError = null;
@@ -214,17 +249,12 @@ export default function VideoPlayer({
       mediaOnError = null;
     };
 
-    // A playback attempt failed. First failure on a direct http(s) URL → replay the
-    // SAME stream through the backend proxy (correct Referer/Origin, fixes CORS &
-    // hotlink). Only once the proxied attempt also fails do we advance to the next source.
+    // A playback attempt failed → advance to the next source. We deliberately do NOT
+    // relay the stream through any backend proxy: all streaming stays on the user's
+    // device (Aniyomi model). Hosts that block cross-origin playback fall back to the
+    // visible embed iframe (the host's own player) — see startExtractionBatch.
     const onFail = (reason) => {
       if (destroyed) return;
-      if (!triedProxy && /^https?:\/\//i.test(activeUrl)) {
-        triedProxy = true;
-        console.log('[player] direct play failed, retrying via proxy:', reason);
-        load(hlsProxyUrl(activeUrl, referer));
-        return;
-      }
       console.log('[player] source failed, trying next:', reason);
       tryNextSource();
     };
@@ -232,10 +262,9 @@ export default function VideoPlayer({
     function load(url) {
       if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
       detachMedia();
-      // Decide the engine by the CONTENT (m3u8), not the URL — a proxied mp4 still
-      // contains "/proxy/hls/" but must use the native player, not hls.js.
+      // Decide the engine by content type: m3u8 → hls.js, otherwise the native player.
       if (isHlsContent && Hls.isSupported()) {
-        const hls = new Hls();
+        const hls = new Hls(getHlsConfig());
         hlsRef.current = hls;
         hls.loadSource(url);
         hls.attachMedia(video);
@@ -244,9 +273,12 @@ export default function VideoPlayer({
           if (data.fatal) onFail(`hls:${data.details}`);
         });
       } else {
-        // Direct mp4/webm, native HLS on Safari, or a proxied stream.
+        // Direct mp4/webm, or native HLS on Safari.
+        // preload="auto" tells the browser to fetch as much as bandwidth allows,
+        // so seek-forward within the episode is instant once data is in cache.
         mediaOnReady = onReady;
         mediaOnError = () => onFail('media');
+        video.preload = 'auto';
         video.addEventListener('loadeddata', mediaOnReady);
         video.addEventListener('error', mediaOnError);
         video.src = url;
@@ -256,11 +288,21 @@ export default function VideoPlayer({
     load(activeUrl);
 
     return () => {
+      // On episode change (or unmount): destroy the HLS instance and explicitly
+      // release the <video> element. This frees the SourceBuffer + decoder memory
+      // so the next episode starts with a clean slate instead of accumulating buffers.
       destroyed = true;
       detachMedia();
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
+      }
+      if (video) {
+        try {
+          video.pause();
+          video.removeAttribute('src');
+          video.load();
+        } catch { /* ignored — element may already be detached */ }
       }
     };
   }, [videoData?.url, extractedUrl]);
