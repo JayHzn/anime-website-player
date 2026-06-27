@@ -109,6 +109,7 @@ export default function VideoPlayer({
   const lastTap = useRef({ time: 0, x: 0 });
   const tapTimeout = useRef(null);
   const [doubleTapSide, setDoubleTapSide] = useState(null); // 'left' | 'right' | null
+  const [seekFeedbackTick, setSeekFeedbackTick] = useState(0); // bumps each trigger so the CSS animation restarts
   const doubleTapTimer = useRef(null);
 
   // Reset state when video changes
@@ -368,6 +369,18 @@ export default function VideoPlayer({
     return () => clearTimeout(hideTimeout.current);
   }, [isPlaying]);
 
+  // YouTube-style ±10s feedback bubble: scales up while fading out in 600ms.
+  // Used by keyboard arrows, double-tap, and the on-screen skip buttons so the
+  // user gets the same visual confirmation no matter how they triggered the seek.
+  // The tick counter forces React to remount the bubble even if the user mashes
+  // the SAME arrow twice — otherwise the CSS animation wouldn't restart.
+  const triggerSeekFeedback = useCallback((side) => {
+    setDoubleTapSide(side);
+    setSeekFeedbackTick((t) => t + 1);
+    if (doubleTapTimer.current) clearTimeout(doubleTapTimer.current);
+    doubleTapTimer.current = setTimeout(() => setDoubleTapSide(null), 600);
+  }, []);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKey = (e) => {
@@ -393,9 +406,11 @@ export default function VideoPlayer({
           break;
         case 'ArrowLeft':
           video.currentTime -= 10;
+          triggerSeekFeedback('left');
           break;
         case 'ArrowRight':
           video.currentTime += 10;
+          triggerSeekFeedback('right');
           break;
         case 'ArrowUp':
           e.preventDefault();
@@ -463,10 +478,8 @@ export default function VideoPlayer({
         }
       }
 
-      // Show visual feedback
-      setDoubleTapSide(side);
-      if (doubleTapTimer.current) clearTimeout(doubleTapTimer.current);
-      doubleTapTimer.current = setTimeout(() => setDoubleTapSide(null), 600);
+      // Show visual feedback (shared with keyboard ±10s shortcuts)
+      triggerSeekFeedback(side);
 
       lastTap.current = { time: 0, x: 0 };
       resetHideTimer();
@@ -766,14 +779,17 @@ export default function VideoPlayer({
         </div>
       )}
 
-      {/* Double-tap seek feedback */}
+      {/* ±10s seek feedback (keyboard ArrowL/R, double-tap, skip buttons) */}
       {doubleTapSide && (
         <div
           className={`absolute top-0 bottom-0 flex items-center justify-center pointer-events-none z-20 ${
             doubleTapSide === 'right' ? 'right-0 w-1/3' : 'left-0 w-1/3'
           }`}
         >
-          <div className="bg-white/20 rounded-full w-20 h-20 flex flex-col items-center justify-center animate-ping-once">
+          <div
+            key={seekFeedbackTick}
+            className="bg-white/20 backdrop-blur-sm rounded-full w-20 h-20 flex flex-col items-center justify-center animate-ping-once"
+          >
             <SkipForward className={`w-6 h-6 text-white ${doubleTapSide === 'left' ? 'rotate-180' : ''}`} />
             <span className="text-white text-xs font-bold mt-0.5">
               {doubleTapSide === 'right' ? '+10s' : '-10s'}
@@ -962,7 +978,13 @@ export default function VideoPlayer({
             <div className="flex items-center gap-2">
               {/* Skip back */}
               <button
-                onClick={(e) => { e.stopPropagation(); if (videoRef.current) videoRef.current.currentTime -= 10; }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (videoRef.current) {
+                    videoRef.current.currentTime -= 10;
+                    triggerSeekFeedback('left');
+                  }
+                }}
                 className="p-2 rounded-lg hover:bg-white/10 transition"
               >
                 <SkipBack className="w-4 h-4 text-white" />
@@ -981,7 +1003,13 @@ export default function VideoPlayer({
 
               {/* Skip forward */}
               <button
-                onClick={(e) => { e.stopPropagation(); if (videoRef.current) videoRef.current.currentTime += 10; }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (videoRef.current) {
+                    videoRef.current.currentTime += 10;
+                    triggerSeekFeedback('right');
+                  }
+                }}
                 className="p-2 rounded-lg hover:bg-white/10 transition"
               >
                 <SkipForward className="w-4 h-4 text-white" />
