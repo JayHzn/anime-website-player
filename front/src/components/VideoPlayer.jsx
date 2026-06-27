@@ -88,6 +88,7 @@ export default function VideoPlayer({
   const isMobileApp = typeof window !== 'undefined' && !!window.__ANIMEHUB_MOBILE__;
   const [showControls, setShowControls] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
+  const [isBuffering, setIsBuffering] = useState(false);
   const [videoError, setVideoError] = useState(null);
   const [activeSkip, setActiveSkip] = useState(null); // 'opening' | 'ending' | null
   const [showSkipEditor, setShowSkipEditor] = useState(false);
@@ -225,6 +226,7 @@ export default function VideoPlayer({
     if (!video || !activeUrl) return;
 
     setIsLoading(true);
+    setIsBuffering(false);
     setVideoError(null);
 
     const isHlsContent = activeUrl.includes('.m3u8');
@@ -242,9 +244,29 @@ export default function VideoPlayer({
       video.play().catch(() => {});
     };
 
+    // ── Buffering indicator ──────────────────────────────────
+    // The browser fires `waiting`/`stalled` when the SourceBuffer ran out of data
+    // (seek-forward beyond what's prefetched, slow segment, etc.). `playing` /
+    // `canplaythrough` fire once data resumes. We surface this as a spinner so the
+    // user understands the freeze is "loading", not "broken".
+    const onWaiting = () => { if (!destroyed) setIsBuffering(true); };
+    const onPlayingOrCanPlay = () => { if (!destroyed) setIsBuffering(false); };
+    video.addEventListener('waiting', onWaiting);
+    video.addEventListener('stalled', onWaiting);
+    video.addEventListener('seeking', onWaiting);
+    video.addEventListener('playing', onPlayingOrCanPlay);
+    video.addEventListener('canplaythrough', onPlayingOrCanPlay);
+    video.addEventListener('seeked', onPlayingOrCanPlay);
+
     const detachMedia = () => {
       if (mediaOnReady) video.removeEventListener('loadeddata', mediaOnReady);
       if (mediaOnError) video.removeEventListener('error', mediaOnError);
+      video.removeEventListener('waiting', onWaiting);
+      video.removeEventListener('stalled', onWaiting);
+      video.removeEventListener('seeking', onWaiting);
+      video.removeEventListener('playing', onPlayingOrCanPlay);
+      video.removeEventListener('canplaythrough', onPlayingOrCanPlay);
+      video.removeEventListener('seeked', onPlayingOrCanPlay);
       mediaOnReady = null;
       mediaOnError = null;
     };
@@ -730,10 +752,17 @@ export default function VideoPlayer({
         playsInline
       />
 
-      {/* Loading spinner */}
+      {/* Loading spinner (initial load: full overlay with dimmed background) */}
       {isLoading && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/60">
           <div className="w-12 h-12 border-3 border-white/20 border-t-accent-primary rounded-full animate-spin" />
+        </div>
+      )}
+
+      {/* Buffering spinner (mid-playback: lighter, non-modal — frame stays visible) */}
+      {!isLoading && isBuffering && !videoError && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+          <div className="w-14 h-14 border-3 border-white/15 border-t-accent-primary rounded-full animate-spin drop-shadow-lg" />
         </div>
       )}
 
