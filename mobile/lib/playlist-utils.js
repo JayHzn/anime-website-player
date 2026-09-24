@@ -21,16 +21,47 @@ const CODECS_RE = /CODECS="([^"]+)"/;
 const RESOLUTION_RE = /RESOLUTION=(\d+)[xX](\d+)/;
 const BANDWIDTH_RE = /BANDWIDTH=(\d+)/;
 
-/** Resolve a possibly-relative playlist URI against the playlist it came from. */
+/**
+ * Resolve a possibly-relative playlist URI against the playlist it came from.
+ *
+ * Master playlists reference their variants relatively far more often than not,
+ * so this is on the critical path. `new URL(relative, base)` is the right tool,
+ * but React Native's URL implementation is only partial and the two-argument
+ * form can't be relied on there — and a failure here is silent, costing us the
+ * variant rather than raising. Hence the manual fallback.
+ */
 export function fixUrl(url, baseUrl) {
   if (!url) return null;
   const trimmed = url.trim();
   if (!trimmed) return null;
+
   try {
-    return new URL(trimmed, baseUrl).href;
-  } catch {
-    return null;
+    const resolved = new URL(trimmed, baseUrl).href;
+    if (resolved) return resolved;
+  } catch { /* fall through to the manual resolution below */ }
+
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (trimmed.startsWith('//')) {
+    const scheme = /^(https?):/i.exec(baseUrl ?? '')?.[1] ?? 'https';
+    return `${scheme}:${trimmed}`;
   }
+  if (!baseUrl) return null;
+
+  const m = /^(https?:\/\/[^/?#]+)([^?#]*)/i.exec(baseUrl);
+  if (!m) return null;
+  const [, origin, path] = m;
+
+  if (trimmed.startsWith('/')) return origin + trimmed;
+
+  // Relative to the playlist's directory, with ../ and ./ collapsed.
+  const dir = path.slice(0, path.lastIndexOf('/') + 1) || '/';
+  const segments = [];
+  for (const part of `${dir}${trimmed}`.split('/')) {
+    if (part === '.' || part === '') continue;
+    if (part === '..') segments.pop();
+    else segments.push(part);
+  }
+  return `${origin}/${segments.join('/')}`;
 }
 
 /**

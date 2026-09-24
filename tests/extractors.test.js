@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 import { unpack, isPacked, unpackIfNeeded } from '../extension/lib/unpacker.js';
 import { parseMasterPlaylist, fixUrl } from '../extension/lib/playlist-utils.js';
@@ -7,6 +7,7 @@ import {
 } from '../extension/lib/video.js';
 import { findExtractor, DEFAULT_HOST_PRIORITY } from '../extension/lib/extractors/index.js';
 import { base64ToBinary, base64ToUtf8, utf8ToBase64 } from '../extension/lib/base64.js';
+import { httpGetText } from '../extension/lib/http.js';
 import { toWebVtt } from '../extension/lib/subtitles.js';
 
 // ── Unpacker ─────────────────────────────────────────────────
@@ -111,8 +112,9 @@ audio-only/index.m3u8
 });
 
 describe('fixUrl', () => {
+  const base = 'https://a.example.com/hls/master.m3u8';
+
   it('resolves relative, absolute and protocol-relative URLs', () => {
-    const base = 'https://a.example.com/hls/master.m3u8';
     expect(fixUrl('x.m3u8', base)).toBe('https://a.example.com/hls/x.m3u8');
     expect(fixUrl('/x.m3u8', base)).toBe('https://a.example.com/x.m3u8');
     expect(fixUrl('//b.example.com/x.m3u8', base)).toBe('https://b.example.com/x.m3u8');
@@ -122,6 +124,44 @@ describe('fixUrl', () => {
   it('returns null for empty input', () => {
     expect(fixUrl('', 'https://a.example.com/')).toBeNull();
     expect(fixUrl(undefined, 'https://a.example.com/')).toBeNull();
+  });
+
+  // React Native's URL is only partial and can't be trusted with the
+  // two-argument form. Simulate that and check the manual path agrees with the
+  // platform one — a mismatch here silently loses quality variants on mobile.
+  describe('without a usable two-argument URL constructor (React Native)', () => {
+    const cases = [
+      ['x.m3u8', 'https://a.example.com/hls/x.m3u8'],
+      ['./x.m3u8', 'https://a.example.com/hls/x.m3u8'],
+      ['../up.m3u8', 'https://a.example.com/up.m3u8'],
+      ['sub/dir/x.m3u8', 'https://a.example.com/hls/sub/dir/x.m3u8'],
+      ['/root.m3u8', 'https://a.example.com/root.m3u8'],
+      ['//b.example.com/x.m3u8', 'https://b.example.com/x.m3u8'],
+      ['https://c.example.com/x.m3u8', 'https://c.example.com/x.m3u8'],
+    ];
+
+    let RealURL;
+    beforeEach(() => {
+      RealURL = globalThis.URL;
+      // Mimic a partial implementation: one-argument parsing works, the
+      // base-relative form throws.
+      globalThis.URL = class extends RealURL {
+        constructor(input, baseArg) {
+          if (baseArg !== undefined) throw new TypeError('not implemented');
+          super(input);
+        }
+      };
+    });
+    afterEach(() => { globalThis.URL = RealURL; });
+
+    it.each(cases)('resolves %s', (input, expected) => {
+      expect(fixUrl(input, base)).toBe(expected);
+    });
+
+    it('resolves a query-carrying base against its directory', () => {
+      expect(fixUrl('seg.m3u8', 'https://a.example.com/hls/master.m3u8?token=abc'))
+        .toBe('https://a.example.com/hls/seg.m3u8');
+    });
   });
 });
 
@@ -188,6 +228,57 @@ describe('video model', () => {
       createVideo({ url: '720', host: 'voe', resolution: 720 }),
     ];
     expect(sortVideos(videos, { quality: 720 })[0].url).toBe('720');
+  });
+});
+
+// ── HTTP client ──────────────────────────────────────────────
+// Regression: `AbortSignal.timeout` doesn't exist on Hermes. Calling it
+// unguarded threw on the first fetch of every extractor, so the app resolved
+// nothing and fell back to the host's embed player while the extension played
+// the stream normally.
+
+describe('httpGet timeout handling', () => {
+  let realFetch;
+  let realTimeout;
+
+  beforeEach(() => {
+    realFetch = globalThis.fetch;
+    realTimeout = AbortSignal.timeout;
+  });
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    AbortSignal.timeout = realTimeout;
+  });
+
+  it('still issues the request when AbortSignal.timeout is missing', async () => {
+    delete AbortSignal.timeout;
+    const calls = [];
+    globalThis.fetch = (url, opts) => {
+      calls.push({ url, opts });
+      return Promise.resolve({ ok: true, text: () => Promise.resolve('BODY') });
+    };
+
+    const body = await httpGetText('https://host.example/embed');
+    expect(body).toBe('BODY');
+    expect(calls).toHaveLength(1);
+    // A working abort signal is still supplied, via AbortController.
+    expect(calls[0].opts.signal).toBeDefined();
+  });
+
+  it('uses AbortSignal.timeout when the platform provides it', async () => {
+    const sentinel = new AbortController().signal;
+    AbortSignal.timeout = () => sentinel;
+    globalThis.fetch = (_url, opts) => Promise.resolve({
+      ok: true,
+      text: () => Promise.resolve(opts.signal === sentinel ? 'USED' : 'NOT USED'),
+    });
+
+    expect(await httpGetText('https://host.example/embed')).toBe('USED');
+  });
+
+  it('returns null instead of throwing when the request fails', async () => {
+    globalThis.fetch = () => Promise.reject(new Error('network down'));
+    expect(await httpGetText('https://host.example/embed')).toBeNull();
   });
 });
 

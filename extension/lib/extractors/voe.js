@@ -7,7 +7,7 @@
 
 import { base64ToBinary, base64ToUtf8 } from '../base64.js';
 import { httpGetText } from '../http.js';
-import { extractFromHls } from '../playlist-utils.js';
+import { extractFromHls, fixUrl } from '../playlist-utils.js';
 import { buildHeaders, createVideo } from '../video.js';
 
 const REDIRECT_RE = /window\.location\.href\s*=\s*'([^']+)'/;
@@ -52,7 +52,7 @@ export const voe = {
     // VOE often serves a one-line bounce page before the real embed.
     const redirect = REDIRECT_RE.exec(html)?.[1];
     if (redirect) {
-      pageUrl = new URL(redirect, url).href;
+      pageUrl = fixUrl(redirect, url) ?? url;
       html = await httpGetText(pageUrl, { referer, headers: buildHeaders(referer) });
       if (!html) return [];
     }
@@ -68,7 +68,8 @@ export const voe = {
       .map((c) => {
         const file = c?.file;
         if (!file) return null;
-        return { url: new URL(file, pageUrl).href, lang: c.label || 'Subtitle' };
+        const url = fixUrl(file, pageUrl);
+        return url ? { url, lang: c.label || 'Subtitle' } : null;
       })
       .filter(Boolean);
 

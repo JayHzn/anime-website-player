@@ -21,7 +21,8 @@
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#0f172a"
       },
-      "package": "com.animehub.mobile"
+      "package": "com.animehub.mobile",
+      "versionCode": 2
     },
     "plugins": [
       "expo-asset",

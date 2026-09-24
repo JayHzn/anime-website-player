@@ -5,7 +5,7 @@
 // X-Frame-Options, so the hidden-iframe path can never see it.
 
 import { httpGetText } from '../http.js';
-import { extractFromHls } from '../playlist-utils.js';
+import { extractFromHls, fixUrl } from '../playlist-utils.js';
 import { buildHeaders, createVideo } from '../video.js';
 
 export const sendvid = {
@@ -24,7 +24,8 @@ export const sendvid = {
       : /<source[^>]*\bsrc=["']([^"']+\.(?:m3u8|mp4)[^"']*)["']/i.exec(html)?.[1];
     if (!src) return [];
 
-    const masterUrl = new URL(src, url).href;
+    const masterUrl = fixUrl(src, url);
+    if (!masterUrl) return [];
     const label = (q) => `${prefix}Sendvid - ${q}`;
 
     if (masterUrl.includes('.m3u8')) {

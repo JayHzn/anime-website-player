@@ -111,6 +111,31 @@ export async function clearRefererRules() {
 }
 
 /**
+ * A timeout signal that works on both runtimes.
+ *
+ * `AbortSignal.timeout` is missing on Hermes (React Native's polyfill doesn't
+ * provide it). Calling it unguarded threw on the very first fetch, so every
+ * extractor returned nothing and the app fell back to the host's embed player
+ * while the extension resolved the stream fine — see the same note in
+ * mobile/sources/franime.js, where this bit once already.
+ *
+ * @returns {{ signal: AbortSignal|undefined, clear: () => void }}
+ */
+function timeoutSignal(ms) {
+  if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+    try {
+      return { signal: AbortSignal.timeout(ms), clear: () => {} };
+    } catch { /* present but unusable — fall through */ }
+  }
+  if (typeof AbortController !== 'function') {
+    return { signal: undefined, clear: () => {} }; // no abort support: rely on the platform timeout
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  return { signal: controller.signal, clear: () => clearTimeout(timer) };
+}
+
+/**
  * GET a URL with the headers a video host expects.
  *
  * @param {string} url
@@ -135,11 +160,13 @@ export async function httpGet(url, opts = {}) {
     }
   }
 
-  return fetch(url, {
-    headers: finalHeaders,
-    signal: AbortSignal.timeout(timeout),
-    redirect: 'follow',
-  });
+  const { signal, clear } = timeoutSignal(timeout);
+  try {
+    return await fetch(url, { headers: finalHeaders, signal, redirect: 'follow' });
+  } finally {
+    // Don't leave the fallback timer pending once the request has settled.
+    clear();
+  }
 }
 
 /** GET and return the body as text, or null on any non-2xx / network failure. */
