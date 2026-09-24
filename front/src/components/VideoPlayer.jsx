@@ -183,10 +183,23 @@ export default function VideoPlayer({
     }, '*');
 
     return () => window.postMessage({ type: 'ANIME_EXT_STOP_NATIVE' }, '*');
-    // initialTime lands late (progress fetch); re-sending on every change would
-    // restart playback, so the player is handed the value it had at handover.
+    // Deliberately keyed on the episode only: initialTime and skipSegments arrive
+    // later and are pushed as updates below, because re-sending the whole payload
+    // would remount the player and restart the stream.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [delegateToNative, videoData?.url]);
+
+  // Both of these are fetched separately from the video and land after the
+  // handover — progress after a round-trip, skip segments potentially minutes
+  // later while the backend is still analysing. Without this the app would
+  // always restart episodes from zero and never show the skip buttons.
+  useEffect(() => {
+    if (!delegateToNative) return;
+    window.postMessage({
+      type: 'ANIME_EXT_UPDATE_NATIVE',
+      payload: { initialTime, skipSegments },
+    }, '*');
+  }, [delegateToNative, initialTime, skipSegments]);
 
   useEffect(() => {
     if (!delegateToNative) return;

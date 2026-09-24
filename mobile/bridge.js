@@ -242,7 +242,12 @@ export const BRIDGE_SCRIPT = `
 
   // Messages the site sends us. ANIME_EXT_REQUEST is the source/scraping bridge;
   // the PLAY/STOP pair hands an episode over to the native player.
-  var FORWARDED = ['ANIME_EXT_REQUEST', 'ANIME_EXT_PLAY_NATIVE', 'ANIME_EXT_STOP_NATIVE'];
+  var FORWARDED = [
+    'ANIME_EXT_REQUEST',
+    'ANIME_EXT_PLAY_NATIVE',
+    'ANIME_EXT_UPDATE_NATIVE',
+    'ANIME_EXT_STOP_NATIVE',
+  ];
 
   window.addEventListener('message', function(event) {
     if (event.source !== window) return;

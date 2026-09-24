@@ -57,7 +57,9 @@ export default function NativePlayer({ data, onEvent }) {
   const [showControls, setShowControls] = useState(true);
   const [menu, setMenu] = useState(null);          // 'quality' | 'subtitles' | null
   const [seekHint, setSeekHint] = useState(null);  // 'left' | 'right' | null
-  const [currentTime, setCurrentTime] = useState(data?.initialTime ?? 0);
+  // Actual playback position, so it starts at 0 even when a resume is queued —
+  // the late-resume effect reads it to decide whether resuming is still wanted.
+  const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [dragTime, setDragTime] = useState(null);  // non-null while scrubbing
   const [failed, setFailed] = useState(false);
@@ -111,6 +113,12 @@ export default function NativePlayer({ data, onEvent }) {
 
   // ── Variant switching ──────────────────────────────────────
   // Skipped on the first render: useVideoPlayer already loaded videos[0].
+  //
+  // Keyed on the active URL, NOT on `videos` or `index`: the site pushes metadata
+  // updates (resume position, OP/ED segments) that rebuild `data` — and with it
+  // the `videos` array identity — while the stream is unchanged. Depending on the
+  // array would reload the stream on every one of those updates.
+  const activeUrl = videos[index]?.url;
   const mounted = useRef(false);
   useEffect(() => {
     if (!mounted.current) { mounted.current = true; return; }
@@ -122,9 +130,11 @@ export default function NativePlayer({ data, onEvent }) {
     // currentTime is read as the resume point, not tracked: re-running this on
     // every tick would reload the stream once a second.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [index, videos, player]);
+  }, [activeUrl]);
 
   // ── Status → resume / failover ─────────────────────────────
+  // Declared before the late-resume effect below so that, on the render where a
+  // reloaded source becomes ready, the queued position wins over it.
   useEffect(() => {
     if (status === 'readyToPlay') {
       setFailed(false);
@@ -151,6 +161,29 @@ export default function NativePlayer({ data, onEvent }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
+
+  // ── Late resume position ───────────────────────────────────
+  // The site fetches saved progress separately from the video, so `initialTime`
+  // normally lands after the handover — without this, every episode would restart
+  // from zero in the app.
+  //
+  // Two things it must not do: fight the effect above (a variant switch queues
+  // the live position in `pendingSeek`, which owns the resume until it's applied),
+  // and yank the viewer backwards if the value shows up long after they started
+  // watching.
+  const initialTime = data?.initialTime ?? 0;
+  useEffect(() => {
+    if (initialTime <= 1 || seekApplied.current) return;
+    if (pendingSeek.current > 0) return;            // a resume is already queued
+    if (currentTime > 5) { seekApplied.current = true; return; } // too late, leave it
+    if (status !== 'readyToPlay') {
+      pendingSeek.current = initialTime;            // applied once the source is ready
+      return;
+    }
+    player.currentTime = initialTime;
+    seekApplied.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialTime, status]);
 
   // ── Progress ───────────────────────────────────────────────
   useEventListener(player, 'timeUpdate', ({ currentTime: t }) => {

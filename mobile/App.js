@@ -255,6 +255,13 @@ export default function App() {
         setNativePlayback(msg.payload ?? null);
         return;
       }
+      // Late-arriving metadata (resume position, OP/ED segments). Merged into the
+      // existing payload — episodeKey is untouched, so NativePlayer keeps its
+      // identity and playback isn't interrupted.
+      if (msg.type === "ANIME_EXT_UPDATE_NATIVE") {
+        setNativePlayback((prev) => (prev ? { ...prev, ...msg.payload } : prev));
+        return;
+      }
       if (msg.type === "ANIME_EXT_STOP_NATIVE") {
         setNativePlayback(null);
         return;
