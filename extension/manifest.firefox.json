@@ -11,6 +11,7 @@
   },
   "permissions": [],
   "host_permissions": [
+    "https://*/*",
     "https://v6.voiranime.com/*",
     "https://*.vidmoly.to/*",
     "https://*.vidmoly.biz/*",

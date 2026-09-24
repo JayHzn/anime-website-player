@@ -2,6 +2,8 @@
 // WordPress + DooPlay 2.4.1 theme
 // Episodes via paginated search, video via admin-ajax doo_player_ajax
 
+import { buildVideoResponse } from '../lib/resolve.js';
+
 const BASE = 'https://on.jetanimes.com';
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -65,12 +67,6 @@ function get(url) {
 }
 
 // ── JetAnimesSource ──────────────────────────────────────────
-
-// Hosts that build the stream URL at runtime (jwplayer/hls.js): it's never in the static
-// HTML, so a server-side fetch+regex can't find it — go straight to iframe extraction
-// (player-extractor handles all of these in-context). Hosts that DO expose a direct URL —
-// sendvid, f16px, myvi, sibnet… — are deliberately absent so they're still resolved.
-const JS_GATED_HOSTS = /vidmoly|voe|streamtape|uqload|vudeo|sbfull|streamsb|streamz|vidhide|earnvids|fitus|lulu|secured|filemoon/i;
 
 export class JetAnimesSource {
 
@@ -370,9 +366,7 @@ export class JetAnimesSource {
         if (!ajaxRes.ok) return null;
         const data = await ajaxRes.json();
         if (!data.embed_url) return null;
-        const embedUrl = forceHttps(data.embed_url);
-        const resolved = await this._resolveVideoUrl(embedUrl, epUrl);
-        return { srv, embedUrl, url: resolved.url };
+        return { srv, embedUrl: forceHttps(data.embed_url) };
       } catch {
         return null;
       }
@@ -380,60 +374,17 @@ export class JetAnimesSource {
 
     // Keep only servers that returned an embed; expose their distinct URLs for cycling.
     const valid = attempts.filter(Boolean);
-    const sourcesOut = valid.map((a) => ({ name: a.srv.name, url: a.embedUrl }));
-
-    // Prefer a server that resolved to a direct video URL.
-    const direct = valid.find((a) => this._isDirectUrl(a.url));
-    if (direct) {
-      return {
-        url: direct.url,
-        sourceUrl: direct.embedUrl,
-        referer: epUrl,
-        headers: { Referer: epUrl },
-        subtitles: [],
-        sources: sourcesOut,
-      };
+    if (valid.length === 0) {
+      throw new Error(`Aucune source vidéo trouvée pour ${episodeId}`);
     }
 
-    // No direct URL — fall back to the first working embed in iframe mode.
-    if (valid.length > 0) {
-      return {
-        type: 'iframe',
-        url: valid[0].embedUrl,
-        referer: epUrl,
-        headers: { Referer: epUrl },
-        subtitles: [],
-        sources: sourcesOut,
-      };
-    }
-
-    throw new Error(`Aucune source vidéo trouvée pour ${episodeId}`);
+    return buildVideoResponse(
+      valid.map((a) => ({ name: a.srv.name, url: a.embedUrl })),
+      { referer: epUrl, prefix: (src) => (src.name ? `${src.name} ` : '') }
+    );
   }
 
   // ── Helpers ──────────────────────────────────────────────
-
-  _isDirectUrl(url) {
-    return /\.(m3u8|mp4|webm)(\?|$)/i.test(url || '');
-  }
-
-  async _resolveVideoUrl(embedUrl, referer) {
-    if (JS_GATED_HOSTS.test(embedUrl)) return { url: embedUrl };
-    try {
-      const res = await fetch(embedUrl, {
-        headers: { Referer: referer, 'User-Agent': UA },
-        signal: AbortSignal.timeout(6000),
-      });
-      if (!res.ok) return { url: embedUrl };
-      const html = await res.text();
-      const m3u8M = html.match(/["'](https?:\/\/[^"']*\.m3u8[^"']*)["']/i);
-      if (m3u8M) return { url: forceHttps(m3u8M[1]) };
-      const mp4M = html.match(/["'](https?:\/\/[^"']*\.mp4[^"']*)["']/i);
-      if (mp4M) return { url: forceHttps(mp4M[1]) };
-      return { url: embedUrl };
-    } catch {
-      return { url: embedUrl };
-    }
-  }
 
   async enrichCoversAsync(_items, _callback) {}
 }

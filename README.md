@@ -92,11 +92,21 @@ anime-website-player/
 ├── extension/             # Extension Chrome (Manifest V3)
 │   ├── background.js      # Service worker (scraping, cache IndexedDB)
 │   ├── content.js         # Injection du bridge dans le site
-│   └── sources/           # Parsers JS (voiranime, voirdrama)
+│   ├── sources/           # Parsers JS (anime-sama, vostfree, jetanimes, franime)
+│   └── lib/               # Bibliothèque d'extraction vidéo (copie de référence)
+│       ├── video.js         # Modèle Video + tri par qualité/hébergeur
+│       ├── playlist-utils.js# Master m3u8 → une Video par variante
+│       ├── unpacker.js      # Dépaquetage des scripts P.A.C.K.E.R.
+│       ├── subtitles.js     # Téléchargement + SRT→VTT + inlining data:
+│       ├── http.js          # GET avec Referer (DNR côté extension, direct côté RN)
+│       ├── resolve.js       # Embeds → réponse pour le lecteur
+│       └── extractors/      # Un extracteur par hébergeur + registre
 └── mobile/                # App Android (React Native / Expo)
-    ├── App.js             # WebView + gestion des sources
+    ├── App.js             # WebView + sources + relais du lecteur natif
+    ├── NativePlayer.js    # Lecteur ExoPlayer/AVPlayer (headers par source)
     ├── bridge.js          # Script injecté (CSS mobile, bridge)
-    └── sources/           # Mêmes parsers que l'extension
+    ├── sources/           # Mêmes parsers que l'extension
+    └── lib/               # Miroir de extension/lib (`npm run sync:lib`)
 ```
 
 ### Comment ça marche
@@ -111,6 +121,41 @@ Utilisateur → Backend (FastAPI)       → Proxy HLS, sauvegarde progression
 ```
 
 L'extension et l'app mobile communiquent avec le site via `window.postMessage`. Le site envoie des requêtes (recherche, épisodes, URL vidéo) et l'extension/app exécute le scraping puis renvoie les résultats.
+
+### Récupération du flux vidéo
+
+Le modèle est celui d'Aniyomi : une source ne connaît que **son** site et s'arrête aux URL d'embed ; c'est le registre partagé `lib/extractors/` qui sait résoudre chaque hébergeur.
+
+```
+source (anime-sama, vostfree…)      → liste d'embeds  [vidmoly, voe, sendvid…]
+lib/extractors (en parallèle)       → extracteur dédié par hébergeur
+lib/playlist-utils.extractFromHls   → master m3u8 → une Video par qualité
+lib/video.sortVideos                → tri : hébergeur préféré, puis qualité, puis débit
+lecteur                             → lit la meilleure, bascule sur la suivante en cas d'échec
+```
+
+Chaque `Video` transporte son URL, ses headers (`Referer`/`Origin`), ses sous-titres et sa qualité. Les headers sont appliqués différemment selon la plateforme (`lib/http.js`) : React Native les envoie directement, l'extension passe par une règle `declarativeNetRequest` de session — `Referer` étant un en-tête interdit pour `fetch()` dans un service worker. Cette règle sert aussi à la **lecture** : hls.js télécharge les segments depuis l'origine du site et ne peut pas non plus poser de `Referer`.
+
+L'extraction en iframe cachée (`player-extractor.js`) n'est plus le chemin principal : elle ne sert que pour les hébergeurs qu'aucun extracteur ne sait résoudre — l'équivalent du `UniversalExtractor` (WebView) d'Aniyomi.
+
+> Pour ajouter un hébergeur : un fichier dans `extension/lib/extractors/`, une ligne dans `index.js`, puis `npm run sync:lib`. Les quatre sources en bénéficient d'un coup.
+
+### Lecture sur mobile
+
+Dans la WebView, hls.js télécharge les segments depuis l'origine du site et une page ne peut pas poser de `Referer`/`Origin` : les hébergeurs qui les vérifient renvoient 403 sur chaque segment. L'app ne lit donc plus la vidéo dans la WebView — elle passe par **ExoPlayer/AVPlayer** (`expo-video`), qui accepte des headers par source, exactement comme Aniyomi.
+
+```
+WebView (le site)         → résout l'épisode, garde l'UI, la progression et l'historique
+  ↓ ANIME_EXT_PLAY_NATIVE   { videos[], titre, position, segments OP/ED }
+NativePlayer (RN)         → ExoPlayer avec les headers de chaque Video
+  ↑ ANIME_EXT_NATIVE_EVENT  time / ended / next / prev / back / failed
+```
+
+Le lecteur natif se superpose à la WebView, qui reste montée : quitter l'épisode est instantané et le site reste seul maître de la navigation. En cas d'échec de **toutes** les variantes, il rend la main (`failed`) et la WebView reprend avec son extracteur en iframe.
+
+Le site détecte la capacité via `window.__ANIMEHUB_NATIVE_PLAYER__`, posé par `bridge.js` : une ancienne version de l'app continue d'utiliser le lecteur WebView.
+
+> `expo-video` est un module natif : après `npx expo install expo-video`, il faut reconstruire l'app (`eas build` ou un dev build). Un simple rechargement JS ne suffit pas.
 
 ### Stack
 

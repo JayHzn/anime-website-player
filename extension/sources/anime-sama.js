@@ -1,5 +1,11 @@
 // ── Anime-sama.to source ─────────────────────────────────────
 // Scrapes anime-sama.to from the user's browser via the extension.
+//
+// Split of responsibilities (borrowed from Aniyomi): this file only knows about
+// anime-sama — its pages, its episodes.js format. Turning the embed URLs it finds
+// into playable streams is the shared extractor registry's job (lib/extractors).
+
+import { buildVideoResponse } from '../lib/resolve.js';
 
 const BASE = 'https://anime-sama.to';
 const SEARCH_URL = `${BASE}/template-php/defaut/fetch.php`;
@@ -42,12 +48,6 @@ function slugFromUrl(url) {
 }
 
 // ── AnimeSamaSource ──────────────────────────────────────────
-
-// Hosts that build the stream URL at runtime (jwplayer/hls.js): it's never in the static
-// HTML, so a server-side fetch+regex can't find it — go straight to iframe extraction
-// (player-extractor handles all of these in-context). Hosts that DO expose a direct URL —
-// sendvid, f16px, myvi, sibnet… — are deliberately absent so they're still resolved.
-const JS_GATED_HOSTS = /vidmoly|voe|streamtape|uqload|vudeo|sbfull|streamsb|streamz|vidhide|earnvids|fitus|lulu|secured|filemoon/i;
 
 export class AnimeSamaSource {
 
@@ -424,45 +424,19 @@ export class AnimeSamaSource {
     // Filter out sibnet (dropped — CDN requires session cookies)
     const filtered = sources.filter(s => !s.url.includes('sibnet'));
     const finalSources = filtered.length > 0 ? filtered : sources;
-    finalSources.sort((a, b) => this._hostPriority(a.url) - this._hostPriority(b.url));
 
     if (finalSources.length === 0) {
       throw new Error(`No video URL found for episode ${epNum}`);
     }
 
-    // Resolve every embed concurrently, then keep the first (highest-priority, since
-    // finalSources is already sorted) that yields a direct video URL. Promise.all
-    // preserves order, so .find() returns the same pick as a sequential loop —
-    // but the wall-clock cost is one timeout instead of the sum of all of them.
-    const resolvedAll = await Promise.all(
-      finalSources.map((src) =>
-        this._resolveVideoUrl(src.url)
-          .then((r) => ({ src, url: r.url }))
-          .catch(() => ({ src, url: src.url }))
-      )
-    );
-    const direct = resolvedAll.find((r) => this._isDirectUrl(r.url));
-    if (direct) {
-      return {
-        url: direct.url,
-        sourceUrl: direct.src.url,
-        referer: `${BASE}/`,
-        headers: { Referer: `${BASE}/` },
-        subtitles: [],
-        sources: finalSources,
-      };
-    }
-
-    // No direct URL found — fall back to best embed URL in iframe mode
-    const best = finalSources[0];
-    return {
-      type: 'iframe',
-      url: forceHttps(best.url),
-      referer: `${BASE}/`,
-      headers: { Referer: `${BASE}/` },
-      subtitles: [],
-      sources: finalSources,
-    };
+    // Hand the embeds to the shared extractor registry (lib/extractors): each host
+    // is resolved by the extractor that knows it, in parallel, and an HLS master is
+    // expanded into one entry per quality. Whatever can't be resolved server-side
+    // comes back in `sources` for the player's iframe fallback.
+    // No label prefix: our `name` here is just "<hostname> (epsN)", and the eps
+    // slot carries no user-facing meaning (the language lives in the URL path).
+    // Each extractor already labels its own videos with the host and quality.
+    return buildVideoResponse(finalSources, { referer: `${BASE}/` });
   }
 
   // ── Video host helpers ───────────────────────────────────
@@ -480,60 +454,6 @@ export class AnimeSamaSource {
       return host;
     } catch {
       return 'Unknown';
-    }
-  }
-
-  _isDirectUrl(url) {
-    if (!url) return false;
-    return /\.(m3u8|mp4|webm)(\?|$)/i.test(url);
-  }
-
-  _hostPriority(url) {
-    // f16px/fmoonh: direct HLS/mp4 link extractable from page
-    if (url.includes('f16px') || url.includes('fmoonh')) return 0;
-    // sendvid: direct video link when file exists
-    if (url.includes('sendvid')) return 1;
-    // voe: obfuscated JS, sometimes extractable
-    if (url.includes('voe')) return 2;
-    // streamtape: obfuscated token URL
-    if (url.includes('streamtape')) return 3;
-    // embed4me / lpayer: lightweight player
-    if (url.includes('embed4me') || url.includes('lpayer')) return 4;
-    // minochinos: similar
-    if (url.includes('minochinos')) return 5;
-    // vidmoly: known unreliable (frequent ww1.vidmoly.to outages, CF Turnstile) → last resort
-    if (url.includes('vidmoly')) return 99;
-    return 10;
-  }
-
-  async _resolveVideoUrl(embedUrl) {
-    if (JS_GATED_HOSTS.test(embedUrl)) return { url: forceHttps(embedUrl) };
-    try {
-      const res = await fetch(embedUrl, {
-        headers: {
-          Referer: `${BASE}/`,
-          'User-Agent': navigator.userAgent,
-        },
-        signal: AbortSignal.timeout(6000),
-      });
-      if (!res.ok) return { url: forceHttps(embedUrl) };
-      const html = await res.text();
-
-      // m3u8 (Vidmoly, LuluStream, etc.)
-      const m3u8M = /(?:file|src)\s*[:=]\s*["'](https?:\/\/[^"']*\.m3u8[^"']*)["']/i.exec(html);
-      if (m3u8M) return { url: forceHttps(m3u8M[1]) };
-
-      // Voe: look for mp4/m3u8 in script
-      const voeM = /(?:source|video_link)\s*[:=]\s*["'](https?:\/\/[^"']*(?:\.mp4|\.m3u8)[^"']*)["']/i.exec(html);
-      if (voeM) return { url: forceHttps(voeM[1]) };
-
-      // Generic: any direct video URL
-      const genericM = /["'](https?:\/\/[^"']*\.(?:mp4|m3u8|webm)[^"']*)["']/i.exec(html);
-      if (genericM) return { url: forceHttps(genericM[1]) };
-
-      return { url: forceHttps(embedUrl) };
-    } catch {
-      return { url: embedUrl };
     }
   }
 

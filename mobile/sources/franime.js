@@ -4,9 +4,13 @@
 // stripping like a service worker), so we don't need the declarativeNetRequest rule —
 // the franime API + Cloudflare both require a real browser UA + franime.fr Referer.
 
+import { buildVideoResponse } from '../lib/resolve.js';
+
 const API = 'https://api.franime.fr/api';
 const SITE = 'https://franime.fr';
-const UA = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36';
+// Desktop Chrome UA: this exact UA + the franime.fr Referer is what makes the GET_LECTEUR
+// endpoint return the embed (verified). A mobile UA may behave differently with Cloudflare.
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
 function forceHttps(url) {
   if (!url) return url;
@@ -78,13 +82,13 @@ function slugifyTitle(title) {
   if (!title) return '';
   return title
     .toLowerCase()
-    .normalize('NFD').replace(/\p{M}+/gu, '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
 }
 
 function normalize(s) {
-  return (s || '').toLowerCase().normalize('NFD').replace(/\p{M}+/gu, '');
+  return (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
 
 function pickTitle(a) {
@@ -169,11 +173,6 @@ export function decodeFranimeEmbed(bParam) {
 }
 
 // ── FRAnimeSource ──────────────────────────────────────────────
-
-// Hosts that build the stream URL at runtime (jwplayer/hls.js): it's never in the static
-// HTML, so a server-side fetch+regex can't find it — go straight to iframe extraction.
-// Hosts that DO expose a direct URL (sendvid, f16px, myvi, sibnet…) are deliberately absent.
-const JS_GATED_HOSTS = /vidmoly|voe|streamtape|uqload|vudeo|sbfull|streamsb|streamz|vidhide|earnvids|fitus|lulu|secured|filemoon/i;
 
 export class FRAnimeSource {
 
@@ -384,94 +383,46 @@ export class FRAnimeSource {
     const resolved = await Promise.all(lecteurs.map((name, idx) =>
       this._resolveLecteurEmbed(baseId, apiS, apiE, lang, idx, name)
     ));
-    const embeds = resolved.filter(Boolean);
+    const embeds = resolved.filter((r) => r?.url);
     if (embeds.length === 0) {
-      throw new Error(`Aucune source vidéo résolue pour S${sNum} E${eNum}`);
+      // Surface the per-lecteur failure reason in the error (visible on-screen, no logs needed).
+      const diag = resolved.filter(Boolean).map((r) => `${r.name}=${r.fail}`).join(' · ');
+      throw new Error(`franime S${sNum}E${eNum} — aucune source résolue [${diag}]`);
     }
 
-    embeds.sort((x, y) => this._hostPriority(x.url) - this._hostPriority(y.url));
-
-    const direct = (await Promise.all(embeds.map((src) =>
-      this._resolveVideoUrl(src.url)
-        .then((r) => ({ src, url: r.url }))
-        .catch(() => ({ src, url: src.url }))
-    ))).find((r) => this._isDirectUrl(r.url));
-
-    if (direct) {
-      return {
-        url: direct.url,
-        sourceUrl: direct.src.url,
-        referer: `${SITE}/`,
-        headers: { Referer: `${SITE}/` },
-        subtitles: [],
-        sources: embeds,
-      };
-    }
-
-    return {
-      type: 'iframe',
-      url: embeds[0].url,
-      sourceUrl: embeds[0].url,
+    // Shared extractor registry (lib/extractors) — same code as the extension.
+    return buildVideoResponse(embeds, {
       referer: `${SITE}/`,
-      headers: { Referer: `${SITE}/` },
-      subtitles: [],
-      sources: embeds,
-    };
+      prefix: (src) => (src.name ? `${src.name} ` : ''),
+    });
   }
 
   // ── Video host helpers ───────────────────────────────────
 
   // Resolve one lecteur index to { name, url } (decoded embed), or null on failure.
+  // Returns { name, url } on success, or { name, fail } with a short reason — the reason
+  // is surfaced in getVideoUrl's error so we can see WHY it failed on a release build
+  // (no console access). The API only returns the embed (watch2 + `b`) when the request
+  // carries a franime.fr Referer + a browser UA; RN honours both headers directly.
   async _resolveLecteurEmbed(baseId, apiS, apiE, lang, idx, name) {
     try {
-      // The API only returns the embed (watch2 + `b`) when the request carries a franime.fr
-      // Referer + a browser UA. React Native honours both headers directly (unlike the
-      // extension service worker, which needs a declarativeNetRequest rule for the Referer).
+      // Use the SAME fetch config as makeFetch (which works for the catalogue on mobile)
+      // — notably WITHOUT AbortSignal.timeout, which may be missing/broken in Hermes and
+      // is the only difference from the working call.
       const res = await fetch(`${API}/anime/${baseId}/${apiS}/${apiE}/${lang}/${idx}`, {
         headers: { Referer: `${SITE}/`, Origin: SITE, 'User-Agent': UA },
         credentials: 'include',
-        signal: AbortSignal.timeout(8000),
       });
-      if (!res.ok) return null;
-      const watch2 = (await res.text()).trim();
-      const m = watch2.match(/[?&]b=([^&]+)/);
-      if (!m) return null;
+      let text = '';
+      try { text = (await res.text()).trim(); } catch { text = ''; }
+      if (!res.ok) return { name, fail: `HTTP${res.status}` };
+      const m = text.match(/[?&]b=([^&]+)/);
+      if (!m) return { name, fail: `noB:${text.slice(0, 30) || 'empty'}` };
       const url = decodeFranimeEmbed(m[1]);
-      if (!url) return null;
+      if (!url) return { name, fail: 'decode' };
       return { name: `${name} (${lang.toUpperCase()})`, url: forceHttps(url) };
-    } catch {
-      return null;
-    }
-  }
-
-  _isDirectUrl(url) {
-    return /\.(m3u8|mp4|webm)(\?|$)/i.test(url || '');
-  }
-
-  _hostPriority(url) {
-    if (url.includes('sendvid')) return 0;
-    if (url.includes('vidmoly')) return 1;
-    if (url.includes('sibnet')) return 2;
-    if (url.includes('embed4me') || url.includes('lpayer')) return 3;
-    return 5;
-  }
-
-  async _resolveVideoUrl(embedUrl) {
-    if (JS_GATED_HOSTS.test(embedUrl)) return { url: embedUrl };
-    try {
-      const res = await fetch(embedUrl, {
-        headers: { Referer: `${SITE}/`, 'User-Agent': UA },
-        signal: AbortSignal.timeout(6000),
-      });
-      if (!res.ok) return { url: embedUrl };
-      const html = await res.text();
-      const m3u8 = html.match(/["'](https?:\/\/[^"']*\.m3u8[^"']*)["']/i);
-      if (m3u8) return { url: forceHttps(m3u8[1]) };
-      const mp4 = html.match(/["'](https?:\/\/[^"']*\.mp4[^"']*)["']/i);
-      if (mp4) return { url: forceHttps(mp4[1]) };
-      return { url: embedUrl };
-    } catch {
-      return { url: embedUrl };
+    } catch (e) {
+      return { name, fail: `err:${(e && (e.message || e.name)) || String(e)}` };
     }
   }
 

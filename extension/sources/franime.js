@@ -5,6 +5,8 @@
 // real host embed (sibnet/vidmoly/sendvid/…) via the franime "GET_LECTEUR" API and
 // hand those URLs to the player — no need to load franime's own (auth-gated) SPA.
 
+import { buildVideoResponse } from '../lib/resolve.js';
+
 const API = 'https://api.franime.fr/api';
 const SITE = 'https://franime.fr';
 
@@ -169,12 +171,6 @@ export function decodeFranimeEmbed(bParam) {
 }
 
 // ── FRAnimeSource ──────────────────────────────────────────────
-
-// Hosts that build the stream URL at runtime (jwplayer/hls.js): it's never in the static
-// HTML, so a server-side fetch+regex can't find it — go straight to iframe extraction
-// (player-extractor handles all of these in-context). Hosts that DO expose a direct URL —
-// sendvid, f16px, myvi, sibnet… — are deliberately absent so they're still resolved.
-const JS_GATED_HOSTS = /vidmoly|voe|streamtape|uqload|vudeo|sbfull|streamsb|streamz|vidhide|earnvids|fitus|lulu|secured|filemoon/i;
 
 export class FRAnimeSource {
 
@@ -408,38 +404,13 @@ export class FRAnimeSource {
       throw new Error(`Aucune source vidéo résolue pour S${sNum} E${eNum}`);
     }
 
-    // Order by how cleanly our player handles each host.
-    embeds.sort((x, y) => this._hostPriority(x.url) - this._hostPriority(y.url));
-
-    // Try to pull a direct video URL out of each embed (concurrently); keep the first
-    // (highest-priority) that resolves. Otherwise hand the embeds to VideoPlayer, which
-    // extracts them in hidden iframes.
-    const direct = (await Promise.all(embeds.map((src) =>
-      this._resolveVideoUrl(src.url)
-        .then((r) => ({ src, url: r.url }))
-        .catch(() => ({ src, url: src.url }))
-    ))).find((r) => this._isDirectUrl(r.url));
-
-    if (direct) {
-      return {
-        url: direct.url,
-        sourceUrl: direct.src.url,
-        referer: `${SITE}/`,
-        headers: { Referer: `${SITE}/` },
-        subtitles: [],
-        sources: embeds,
-      };
-    }
-
-    return {
-      type: 'iframe',
-      url: embeds[0].url,
-      sourceUrl: embeds[0].url,
+    // Hand the decoded embeds to the shared extractor registry (lib/extractors).
+    // Whatever it can't resolve server-side stays in `sources` for the player's
+    // iframe fallback.
+    return buildVideoResponse(embeds, {
       referer: `${SITE}/`,
-      headers: { Referer: `${SITE}/` },
-      subtitles: [],
-      sources: embeds,
-    };
+      prefix: (src) => (src.name ? `${src.name} ` : ''),
+    });
   }
 
   // ── Video host helpers ───────────────────────────────────
@@ -464,39 +435,6 @@ export class FRAnimeSource {
       return { name: `${name} (${lang.toUpperCase()})`, url: forceHttps(url) };
     } catch {
       return null;
-    }
-  }
-
-  _isDirectUrl(url) {
-    return /\.(m3u8|mp4|webm)(\?|$)/i.test(url || '');
-  }
-
-  _hostPriority(url) {
-    // sendvid: blocks framing but exposes a direct file (resolvable server-side)
-    if (url.includes('sendvid')) return 0;
-    // vidmoly: jwplayer + HLS, extracted cleanly in a hidden iframe
-    if (url.includes('vidmoly')) return 1;
-    // sibnet: extractable in-iframe (player-extractor is injected there)
-    if (url.includes('sibnet')) return 2;
-    if (url.includes('embed4me') || url.includes('lpayer')) return 3;
-    return 5;
-  }
-
-  async _resolveVideoUrl(embedUrl) {
-    if (JS_GATED_HOSTS.test(embedUrl)) return { url: embedUrl };
-    try {
-      const res = await fetch(embedUrl, {
-        signal: AbortSignal.timeout(6000),
-      });
-      if (!res.ok) return { url: embedUrl };
-      const html = await res.text();
-      const m3u8 = html.match(/["'](https?:\/\/[^"']*\.m3u8[^"']*)["']/i);
-      if (m3u8) return { url: forceHttps(m3u8[1]) };
-      const mp4 = html.match(/["'](https?:\/\/[^"']*\.mp4[^"']*)["']/i);
-      if (mp4) return { url: forceHttps(mp4[1]) };
-      return { url: embedUrl };
-    } catch {
-      return { url: embedUrl };
     }
   }
 

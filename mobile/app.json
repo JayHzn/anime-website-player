@@ -2,7 +2,7 @@
   "expo": {
     "name": "Shinani",
     "slug": "animehub",
-    "version": "1.0.6",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -24,7 +24,14 @@
       "package": "com.animehub.mobile"
     },
     "plugins": [
-      "expo-asset"
+      "expo-asset",
+      [
+        "expo-video",
+        {
+          "supportsPictureInPicture": true,
+          "supportsBackgroundPlayback": false
+        }
+      ]
     ],
     "extra": {
       "eas": {

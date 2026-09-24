@@ -73,6 +73,12 @@ export default function VideoPlayer({
 }) {
   const isIframe = videoData?.type === 'iframe';
 
+  // Resolved variants from the source's extractors (lib/extractors), best first:
+  // one entry per quality of the HLS master, across every host that resolved.
+  // Aniyomi's model — the player picks among real streams instead of a single
+  // guessed URL, and a failing variant falls back to the next one.
+  const videos = videoData?.videos ?? [];
+
   const videoRef = useRef(null);
   const containerRef = useRef(null);
   const hlsRef = useRef(null);
@@ -92,6 +98,9 @@ export default function VideoPlayer({
   const [videoError, setVideoError] = useState(null);
   const [activeSkip, setActiveSkip] = useState(null); // 'opening' | 'ending' | null
   const [showSkipEditor, setShowSkipEditor] = useState(false);
+  const [videoIndex, setVideoIndex] = useState(0);     // index into `videos`
+  const [showQualityMenu, setShowQualityMenu] = useState(false);
+  const [nativeFailed, setNativeFailed] = useState(false); // native player gave up
   const [visibleIframeUrl, setVisibleIframeUrl] = useState(null); // iframe shown to user (fallback)
   const [iframeLoaded, setIframeLoaded] = useState(false);
   const [sourcesExhausted, setSourcesExhausted] = useState(false); // all embed sources failed
@@ -120,6 +129,9 @@ export default function VideoPlayer({
     setSourcesExhausted(false);
     setExtractUrls([]);
     setExtractedUrl(null);
+    setVideoIndex(0);
+    setShowQualityMenu(false);
+    setNativeFailed(false);
     extractionWonRef.current = false;
     clearTimeout(extractTimerRef.current);
     skipDismissed.current.clear();
@@ -142,6 +154,61 @@ export default function VideoPlayer({
         : allSources;
     }
   }, [videoData?.url]);
+
+  // ── Native playback handover (mobile app) ──────────────────
+  // In the app the WebView can't play these streams: hls.js fetches the segments
+  // from this page's origin and a page can't set Referer/Origin, so hosts that
+  // check them 403 every segment. The app plays through ExoPlayer/AVPlayer with
+  // the per-video headers instead (mobile/NativePlayer.js); this page stays the
+  // UI and keeps owning progress, history and episode navigation.
+  const hasNativePlayer = typeof window !== 'undefined' && !!window.__ANIMEHUB_NATIVE_PLAYER__;
+  const delegateToNative = hasNativePlayer && !nativeFailed && videos.length > 0;
+
+  useEffect(() => {
+    if (!delegateToNative) return;
+    window.postMessage({
+      type: 'ANIME_EXT_PLAY_NATIVE',
+      payload: {
+        episodeKey: `${animeTitle}|${videoData?.url}`,
+        videos,
+        subtitles: videoData?.subtitles ?? [],
+        title: animeTitle,
+        episodeLabel: episodeLabel || `Épisode ${episodeNumber}`,
+        initialTime,
+        skipSegments,
+        hasNext: Boolean(onEnded),
+        hasPrev: Boolean(onPrevious),
+        autoplayNext,
+      },
+    }, '*');
+
+    return () => window.postMessage({ type: 'ANIME_EXT_STOP_NATIVE' }, '*');
+    // initialTime lands late (progress fetch); re-sending on every change would
+    // restart playback, so the player is handed the value it had at handover.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [delegateToNative, videoData?.url]);
+
+  useEffect(() => {
+    if (!delegateToNative) return;
+    function onNativeEvent(e) {
+      if (e.data?.type !== 'ANIME_EXT_NATIVE_EVENT') return;
+      switch (e.data.event) {
+        case 'time':   onTimeUpdate?.(e.data.time); break;
+        case 'ended':  onEnded?.(); break;
+        case 'next':   onEnded?.(); break;
+        case 'prev':   onPrevious?.(); break;
+        case 'back':   onBack?.(); break;
+        case 'failed':
+          // Every resolved variant failed natively. Fall back to this page's own
+          // pipeline, which still has the hidden-iframe extractor.
+          console.warn('[player] native playback failed:', e.data.reason);
+          setNativeFailed(true);
+          break;
+      }
+    }
+    window.addEventListener('message', onNativeEvent);
+    return () => window.removeEventListener('message', onNativeEvent);
+  }, [delegateToNative, onTimeUpdate, onEnded, onPrevious, onBack]);
 
   // Start iframe extraction for all iframe-mode sources
   useEffect(() => {
@@ -177,10 +244,18 @@ export default function VideoPlayer({
   }
 
   // Called when a resolved URL (direct or extracted) fails to play.
-  // Moves on to the next source in the queue.
+  // Degrade in the same order Aniyomi does: next resolved variant (usually the
+  // next quality down, or the next host), and only once those run out, the
+  // hidden-iframe extractor — the expensive, JS-executing last resort.
   function tryNextSource() {
     if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
     clearTimeout(extractTimerRef.current);
+
+    if (!extractedUrl && videoIndex + 1 < videos.length) {
+      setVideoIndex(videoIndex + 1);
+      return;
+    }
+
     setExtractedUrl(null);
     setExtractUrls([]);
     setVisibleIframeUrl(null);
@@ -214,14 +289,20 @@ export default function VideoPlayer({
 
   // Setup HLS or native video (only for direct video URLs)
   useEffect(() => {
+    // The app's native player owns playback — don't also buffer it here.
+    if (delegateToNative) {
+      setIsLoading(false);
+      return;
+    }
     // In iframe mode without an extracted URL, skip HLS setup
     if (isIframe && !extractedUrl) {
       setIsLoading(false);
       return;
     }
 
-    // Use extractedUrl (from iframe extractor) if available, else the direct URL
-    const activeUrl = extractedUrl || videoData?.url;
+    // Priority: a URL the iframe extractor won with, else the selected variant,
+    // else whatever single URL the source handed us (older response shape).
+    const activeUrl = extractedUrl || videos[videoIndex]?.url || videoData?.url;
 
     const video = videoRef.current;
     if (!video || !activeUrl) return;
@@ -328,7 +409,7 @@ export default function VideoPlayer({
         } catch { /* ignored — element may already be detached */ }
       }
     };
-  }, [videoData?.url, extractedUrl]);
+  }, [videoData?.url, extractedUrl, videoIndex, delegateToNative]);
 
   // Seek to initialTime when it arrives late (after video already loaded)
   const appliedInitialTime = useRef(false);
@@ -346,6 +427,8 @@ export default function VideoPlayer({
 
   // Progress reporting
   useEffect(() => {
+    // The native player reports its own position (ANIME_EXT_NATIVE_EVENT 'time').
+    if (delegateToNative) return;
     if (isIframe && !extractedUrl) return;
     progressInterval.current = setInterval(() => {
       if (videoRef.current && !videoRef.current.paused) {
@@ -353,7 +436,7 @@ export default function VideoPlayer({
       }
     }, 5000); // report every 5 seconds
     return () => clearInterval(progressInterval.current);
-  }, [onTimeUpdate, isIframe, extractedUrl]);
+  }, [onTimeUpdate, isIframe, extractedUrl, delegateToNative]);
 
   // Auto-hide controls
   const resetHideTimer = useCallback(() => {
@@ -549,6 +632,32 @@ export default function VideoPlayer({
   };
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
+
+  // The source inlines the tracks of the variant it picked; a variant from a
+  // different host carries its own (raw) list as a fallback.
+  const subtitleTracks = (videoData?.subtitles?.length ? videoData.subtitles : videos[videoIndex]?.subtitles) ?? [];
+
+  // Switch variant on user request — same path as an automatic failover, minus
+  // the "this one is broken" part, so we reset the extraction state too.
+  const selectVideo = (index) => {
+    if (index === videoIndex) { setShowQualityMenu(false); return; }
+    if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
+    setExtractedUrl(null);
+    setExtractUrls([]);
+    setVideoIndex(index);
+    setShowQualityMenu(false);
+  };
+
+  // ── Handed over to the app's native player ──
+  // It renders on top of this WebView, so all we need here is a black frame; the
+  // component stays mounted to keep owning progress, history and navigation.
+  if (delegateToNative) {
+    return (
+      <div ref={containerRef} className="relative w-full h-full bg-black flex items-center justify-center">
+        <div className="w-10 h-10 border-2 border-white/10 border-t-accent-primary rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   // ── All embed sources exhausted and none worked ──
   if (sourcesExhausted && !extractedUrl) {
@@ -763,7 +872,20 @@ export default function VideoPlayer({
           if (autoplayNext && onEnded) onEnded();
         }}
         playsInline
-      />
+      >
+        {/* Tracks the source inlined as data: URLs (see extension/lib/subtitles.js).
+            A cross-origin <track> would be blocked, hence the inlining upstream. */}
+        {subtitleTracks.map((t, i) => (
+          <track
+            key={t.url}
+            kind="subtitles"
+            src={t.url}
+            srcLang={t.lang?.slice(0, 2).toLowerCase() || 'fr'}
+            label={t.lang || 'Sous-titres'}
+            default={i === 0}
+          />
+        ))}
+      </video>
 
       {/* Loading spinner (initial load: full overlay with dimmed background) */}
       {isLoading && (
@@ -1053,6 +1175,38 @@ export default function VideoPlayer({
                   <SkipForward className="w-3.5 h-3.5" />
                   Suivant
                 </button>
+              )}
+
+              {/* Quality / source picker — one entry per variant the extractors
+                  resolved, best first (Aniyomi's video list, surfaced to the user). */}
+              {videos.length > 1 && !extractedUrl && (
+                <div className="relative">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setShowQualityMenu(!showQualityMenu); }}
+                    className={`px-2.5 py-1.5 rounded-lg hover:bg-white/10 transition text-xs text-white font-medium ${showQualityMenu ? 'bg-white/10' : ''}`}
+                    title="Qualité / source"
+                  >
+                    {videos[videoIndex]?.quality?.match(/\d{3,4}p/)?.[0] ?? 'Auto'}
+                  </button>
+                  {showQualityMenu && (
+                    <div
+                      className="absolute bottom-full right-0 mb-2 w-64 max-h-64 overflow-y-auto bg-black/90 backdrop-blur-xl border border-white/10 rounded-xl p-1.5 shadow-2xl"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {videos.map((v, i) => (
+                        <button
+                          key={`${v.url}|${v.quality}`}
+                          onClick={() => selectVideo(i)}
+                          className={`w-full text-left px-3 py-2 rounded-lg text-xs transition ${
+                            i === videoIndex ? 'bg-accent-primary/20 text-white' : 'text-white/60 hover:bg-white/10 hover:text-white'
+                          }`}
+                        >
+                          {v.quality}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* Skip editor toggle (only when segments exist) */}

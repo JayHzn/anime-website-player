@@ -5,6 +5,7 @@ import { WebView } from "react-native-webview";
 import * as ScreenOrientation from "expo-screen-orientation";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { BRIDGE_SCRIPT } from "./bridge";
+import NativePlayer from "./NativePlayer";
 import { AnimeSamaSource } from "./sources/anime-sama";
 import { VostfreeSource } from "./sources/vostfree";
 import { JetAnimesSource } from "./sources/jetanimes";
@@ -99,6 +100,9 @@ const SITE_URL = "https://anime-website-player.onrender.com";
 export default function App() {
   const webViewRef = useRef(null);
   const [selectedSource, setSelectedSource] = useState(null);
+  // Non-null while the native player owns the screen (see NativePlayer.js for why
+  // playback can't stay in the WebView).
+  const [nativePlayback, setNativePlayback] = useState(null);
 
   // Load persisted source on mount
   useEffect(() => {
@@ -245,6 +249,17 @@ export default function App() {
         return;
       }
 
+      // Playback handover — the site asks us to take over the frame.
+      if (msg.type === "ANIME_EXT_PLAY_NATIVE") {
+        console.log(`[mobile] native player ← ${msg.payload?.videos?.length ?? 0} variante(s)`);
+        setNativePlayback(msg.payload ?? null);
+        return;
+      }
+      if (msg.type === "ANIME_EXT_STOP_NATIVE") {
+        setNativePlayback(null);
+        return;
+      }
+
       if (msg.type !== "ANIME_EXT_REQUEST") return;
 
       const { id, action, payload } = msg;
@@ -270,6 +285,26 @@ export default function App() {
       }
     },
     [handleAction, sendToWebView]
+  );
+
+  // ── Native player → site ──────────────────────────────────
+  // The site still owns progress, history and episode navigation, so the player
+  // reports back to it rather than duplicating that logic here.
+  const onNativeEvent = useCallback(
+    (event, payload) => {
+      if (event === "back" || event === "ended" || event === "next" || event === "prev") {
+        // The site decides what happens next (autoplay, route change); it sends a
+        // fresh ANIME_EXT_PLAY_NATIVE if another episode starts.
+        setNativePlayback(null);
+      }
+      if (event === "failed") {
+        // Every resolved variant failed. Give the frame back so the WebView player
+        // can try its hidden-iframe extractor.
+        setNativePlayback(null);
+      }
+      sendToWebView({ type: "ANIME_EXT_NATIVE_EVENT", event, ...payload });
+    },
+    [sendToWebView]
   );
 
   // ── Intercept navigations — keep SPA routing client-side ──
@@ -308,6 +343,9 @@ export default function App() {
       StatusBar.setHidden(true);
     } else if (!watching && isOnWatchPage.current) {
       isOnWatchPage.current = false;
+      // Left the player route (back gesture, deep link…) — tear the native
+      // player down too, or it would keep playing over the browse UI.
+      setNativePlayback(null);
       ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
       StatusBar.setHidden(false);
     }
@@ -315,12 +353,18 @@ export default function App() {
 
   // ── Android back button → WebView back ────────────────────
   const onAndroidBackPress = useCallback(() => {
+    // While the native player is up it owns the screen, so back means "leave the
+    // player", not "go back a page" — the site then routes away from /watch.
+    if (nativePlayback) {
+      onNativeEvent("back", {});
+      return true;
+    }
     if (webViewRef.current) {
       webViewRef.current.goBack();
       return true; // prevent app exit
     }
     return false;
-  }, []);
+  }, [nativePlayback, onNativeEvent]);
 
   React.useEffect(() => {
     const sub = BackHandler.addEventListener(
@@ -351,6 +395,16 @@ export default function App() {
         setSupportMultipleWindows={false}
         userAgent="Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
       />
+
+      {/* Overlaid rather than swapped in: the WebView keeps the page (and its
+          React state) alive underneath, so leaving the player is instant. */}
+      {nativePlayback && (
+        <NativePlayer
+          key={nativePlayback.episodeKey ?? nativePlayback.videos?.[0]?.url}
+          data={nativePlayback}
+          onEvent={onNativeEvent}
+        />
+      )}
     </SafeAreaView>
   );
 }

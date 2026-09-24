@@ -2,6 +2,8 @@
 // Adapted from extension/sources/anime-sama.js
 // Change: navigator.userAgent → hardcoded UA string
 
+import { buildVideoResponse } from '../lib/resolve.js';
+
 const BASE = 'https://anime-sama.to';
 const SEARCH_URL = `${BASE}/template-php/defaut/fetch.php`;
 const COVER_BASE = 'https://raw.githubusercontent.com/Anime-Sama/IMG/img/contenu';
@@ -41,11 +43,6 @@ function slugFromUrl(url) {
   const m = url.match(/\/catalogue\/([^/]+)/);
   return m ? m[1] : '';
 }
-
-// Hosts that build the stream URL at runtime (jwplayer/hls.js): it's never in the static
-// HTML, so a server-side fetch+regex can't find it — go straight to iframe extraction.
-// Hosts that DO expose a direct URL (sendvid, f16px…) are deliberately absent.
-const JS_GATED_HOSTS = /vidmoly|voe|streamtape|uqload|vudeo|sbfull|streamsb|streamz|vidhide|earnvids|fitus|lulu|secured|filemoon/i;
 
 // ── AnimeSamaSource ──────────────────────────────────────────
 
@@ -102,7 +99,6 @@ export class AnimeSamaSource {
   async _isAnime(slug) {
     const res = await fetch(`${BASE}/catalogue/${slug}/`, {
       headers: { 'User-Agent': UA },
-      signal: AbortSignal.timeout(5000),
     });
     if (!res.ok) return false;
     const html = await res.text();
@@ -391,40 +387,14 @@ export class AnimeSamaSource {
 
     const filtered = sources.filter(s => !s.url.includes('sibnet'));
     const finalSources = filtered.length > 0 ? filtered : sources;
-    finalSources.sort((a, b) => this._hostPriority(a.url) - this._hostPriority(b.url));
 
     if (finalSources.length === 0) {
       throw new Error(`No video URL found for episode ${epNum}`);
     }
 
-    // Resolve every embed concurrently; keep the first (highest-priority) direct URL.
-    const resolvedAll = await Promise.all(
-      finalSources.map((src) =>
-        this._resolveVideoUrl(src.url)
-          .then((r) => ({ src, url: r.url }))
-          .catch(() => ({ src, url: src.url }))
-      )
-    );
-    const direct = resolvedAll.find((r) => this._isDirectUrl(r.url));
-    if (direct) {
-      return {
-        url: direct.url,
-        referer: direct.src.url,
-        headers: { Referer: direct.src.url },
-        subtitles: [],
-        sources: finalSources,
-      };
-    }
-
-    const best = finalSources[0];
-    return {
-      type: 'iframe',
-      url: forceHttps(best.url),
-      referer: best.url,
-      headers: { Referer: best.url },
-      subtitles: [],
-      sources: finalSources,
-    };
+    // Shared extractor registry (lib/extractors) — same code as the extension.
+    // No label prefix: each extractor already names its own host and quality.
+    return buildVideoResponse(finalSources, { referer: `${BASE}/` });
   }
 
   // ── Video host helpers ───────────────────────────────────
@@ -440,48 +410,6 @@ export class AnimeSamaSource {
       return host;
     } catch {
       return 'Unknown';
-    }
-  }
-
-  _isDirectUrl(url) {
-    if (!url) return false;
-    return /\.(m3u8|mp4|webm)(\?|$)/i.test(url);
-  }
-
-  _hostPriority(url) {
-    if (url.includes('f16px') || url.includes('fmoonh')) return 0;
-    if (url.includes('sendvid')) return 1;
-    if (url.includes('voe')) return 2;
-    if (url.includes('streamtape')) return 3;
-    if (url.includes('vidmoly')) return 5;
-    return 10;
-  }
-
-  async _resolveVideoUrl(embedUrl) {
-    if (JS_GATED_HOSTS.test(embedUrl)) return { url: forceHttps(embedUrl) };
-    try {
-      const res = await fetch(embedUrl, {
-        headers: {
-          Referer: `${BASE}/`,
-          'User-Agent': UA,
-        },
-        signal: AbortSignal.timeout(6000),
-      });
-      if (!res.ok) return { url: forceHttps(embedUrl) };
-      const html = await res.text();
-
-      const m3u8M = /(?:file|src)\s*[:=]\s*["'](https?:\/\/[^"']*\.m3u8[^"']*)["']/i.exec(html);
-      if (m3u8M) return { url: forceHttps(m3u8M[1]) };
-
-      const voeM = /(?:source|video_link)\s*[:=]\s*["'](https?:\/\/[^"']*(?:\.mp4|\.m3u8)[^"']*)["']/i.exec(html);
-      if (voeM) return { url: forceHttps(voeM[1]) };
-
-      const genericM = /["'](https?:\/\/[^"']*\.(?:mp4|m3u8|webm)[^"']*)["']/i.exec(html);
-      if (genericM) return { url: forceHttps(genericM[1]) };
-
-      return { url: forceHttps(embedUrl) };
-    } catch {
-      return { url: embedUrl };
     }
   }
 

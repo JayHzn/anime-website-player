@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "sync:lib": "node scripts/sync-lib.mjs",
+    "sync:lib:check": "node scripts/sync-lib.mjs --check"
   },
   "repository": {
     "type": "git",

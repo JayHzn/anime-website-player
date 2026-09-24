@@ -2,6 +2,8 @@
 // Adapted from extension/sources/vostfree.js
 // Change: navigator.userAgent → hardcoded UA string
 
+import { buildVideoResponse } from '../lib/resolve.js';
+
 const BASE = 'https://vostfree.ws';
 
 const UA = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36';
@@ -38,11 +40,6 @@ function idFromUrl(url) {
 }
 
 // ── VostfreeSource ───────────────────────────────────────────
-
-// Hosts that build the stream URL at runtime (jwplayer/hls.js): it's never in the static
-// HTML, so a server-side fetch+regex can't find it — go straight to iframe extraction.
-// Hosts that DO expose a direct URL (myvi, sendvid…) are deliberately absent.
-const JS_GATED_HOSTS = /vidmoly|voe|streamtape|uqload|vudeo|sbfull|streamsb|streamz|vidhide|earnvids|fitus|lulu|secured|filemoon/i;
 
 export class VostfreeSource {
 
@@ -276,46 +273,13 @@ export class VostfreeSource {
 
     if (sources.length === 0) throw new Error(`No video URLs found for episode ${epN}`);
 
-    sources.sort((a, b) => this._hostPriority(a.url) - this._hostPriority(b.url));
-
-    const referer = `${BASE}/${animeId}.html`;
-
-    // Resolve every embed concurrently; keep the first (highest-priority) direct URL.
-    const resolvedAll = await Promise.all(
-      sources.map((src) =>
-        this._resolveVideoUrl(src.url)
-          .then((r) => ({ src, url: r.url }))
-          .catch(() => ({ src, url: src.url }))
-      )
-    );
-    const direct = resolvedAll.find((r) => this._isDirectUrl(r.url));
-    if (direct) {
-      return {
-        url: direct.url,
-        sourceUrl: direct.src.url,
-        referer,
-        headers: { Referer: referer },
-        subtitles: [],
-        sources,
-      };
-    }
-
-    const best = sources[0];
-    return {
-      type: 'iframe',
-      url: forceHttps(best.url),
-      referer,
-      headers: { Referer: referer },
-      subtitles: [],
-      sources,
-    };
+    return buildVideoResponse(sources, {
+      referer: `${BASE}/${animeId}.html`,
+      prefix: (src) => (src.name ? `${src.name} ` : ''),
+    });
   }
 
   // ── Helpers ──────────────────────────────────────────────
-
-  _isDirectUrl(url) {
-    return /\.(m3u8|mp4|webm)(\?|$)/i.test(url || '');
-  }
 
   _hostName(url) {
     try {
@@ -328,37 +292,6 @@ export class VostfreeSource {
       return host;
     } catch {
       return 'Unknown';
-    }
-  }
-
-  _hostPriority(url) {
-    if (url.includes('uqload')) return 0;
-    if (url.includes('sbfull') || url.includes('streamsb') || url.includes('streamz')) return 1;
-    if (url.includes('vudeo')) return 2;
-    if (url.includes('myvi')) return 3;
-    if (url.includes('voe')) return 4;
-    return 10;
-  }
-
-  async _resolveVideoUrl(embedUrl) {
-    if (JS_GATED_HOSTS.test(embedUrl)) return { url: forceHttps(embedUrl) };
-    try {
-      const res = await fetch(embedUrl, {
-        headers: { Referer: `${BASE}/`, 'User-Agent': UA },
-        signal: AbortSignal.timeout(6000),
-      });
-      if (!res.ok) return { url: forceHttps(embedUrl) };
-      const html = await res.text();
-
-      const m3u8M = html.match(/["'](https?:\/\/[^"']*\.m3u8[^"']*)["']/i);
-      if (m3u8M) return { url: forceHttps(m3u8M[1]) };
-
-      const mp4M = html.match(/["'](https?:\/\/[^"']*\.mp4[^"']*)["']/i);
-      if (mp4M) return { url: forceHttps(mp4M[1]) };
-
-      return { url: forceHttps(embedUrl) };
-    } catch {
-      return { url: forceHttps(embedUrl) };
     }
   }
 

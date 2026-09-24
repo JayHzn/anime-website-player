@@ -234,10 +234,19 @@ export const BRIDGE_SCRIPT = `
     lastScrollY = currentY;
   }, { passive: true });
 
-  // Listen for requests from the site (api.js sends ANIME_EXT_REQUEST)
+  // Tells the site it can delegate playback to the native player instead of
+  // mounting hls.js. Gated on this flag rather than on __ANIMEHUB_MOBILE__ so an
+  // older app build (which would ignore the message and show a black frame)
+  // keeps using the WebView player.
+  window.__ANIMEHUB_NATIVE_PLAYER__ = true;
+
+  // Messages the site sends us. ANIME_EXT_REQUEST is the source/scraping bridge;
+  // the PLAY/STOP pair hands an episode over to the native player.
+  var FORWARDED = ['ANIME_EXT_REQUEST', 'ANIME_EXT_PLAY_NATIVE', 'ANIME_EXT_STOP_NATIVE'];
+
   window.addEventListener('message', function(event) {
     if (event.source !== window) return;
-    if (!event.data || event.data.type !== 'ANIME_EXT_REQUEST') return;
+    if (!event.data || FORWARDED.indexOf(event.data.type) === -1) return;
 
     // Forward to React Native
     if (window.ReactNativeWebView) {
@@ -247,7 +256,7 @@ export const BRIDGE_SCRIPT = `
 
   // Announce "extension" presence — site detects via ANIME_EXT_READY
   function announceReady() {
-    window.postMessage({ type: 'ANIME_EXT_READY', version: '1.0.0-mobile' }, '*');
+    window.postMessage({ type: 'ANIME_EXT_READY', version: '1.0.0-mobile', nativePlayer: true }, '*');
   }
 
   announceReady();
