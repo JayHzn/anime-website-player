@@ -56,6 +56,15 @@ function getHlsConfig() {
 const EXTRACT_CONCURRENCY = 3;
 const EXTRACT_TIMEOUT_MS = 10000;
 
+// Readable name for an embed we couldn't resolve — all we have is its URL.
+function hostLabel(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return 'Lecteur';
+  }
+}
+
 export default function VideoPlayer({
   videoData,
   episodeNumber,
@@ -99,8 +108,10 @@ export default function VideoPlayer({
   const [activeSkip, setActiveSkip] = useState(null); // 'opening' | 'ending' | null
   const [showSkipEditor, setShowSkipEditor] = useState(false);
   const [videoIndex, setVideoIndex] = useState(0);     // index into `videos`
-  const [showQualityMenu, setShowQualityMenu] = useState(false);
+  const [showPlayerMenu, setShowPlayerMenu] = useState(false);
   const [nativeFailed, setNativeFailed] = useState(false); // native player gave up
+  const [failoverNotice, setFailoverNotice] = useState(null); // "source X failed, trying Y"
+  const failoverTimer = useRef(null);
   const [visibleIframeUrl, setVisibleIframeUrl] = useState(null); // iframe shown to user (fallback)
   const [iframeLoaded, setIframeLoaded] = useState(false);
   const [sourcesExhausted, setSourcesExhausted] = useState(false); // all embed sources failed
@@ -130,8 +141,10 @@ export default function VideoPlayer({
     setExtractUrls([]);
     setExtractedUrl(null);
     setVideoIndex(0);
-    setShowQualityMenu(false);
+    setShowPlayerMenu(false);
     setNativeFailed(false);
+    setFailoverNotice(null);
+    clearTimeout(failoverTimer.current);
     extractionWonRef.current = false;
     clearTimeout(extractTimerRef.current);
     skipDismissed.current.clear();
@@ -256,6 +269,12 @@ export default function VideoPlayer({
     }, EXTRACT_TIMEOUT_MS);
   }
 
+  function showFailoverNotice(message) {
+    setFailoverNotice(message);
+    clearTimeout(failoverTimer.current);
+    failoverTimer.current = setTimeout(() => setFailoverNotice(null), 5000);
+  }
+
   // Called when a resolved URL (direct or extracted) fails to play.
   // Degrade in the same order Aniyomi does: next resolved variant (usually the
   // next quality down, or the next host), and only once those run out, the
@@ -265,6 +284,10 @@ export default function VideoPlayer({
     clearTimeout(extractTimerRef.current);
 
     if (!extractedUrl && videoIndex + 1 < videos.length) {
+      const next = videos[videoIndex + 1];
+      // Say so rather than switching silently: an episode that quietly drops to
+      // 480p or to another host otherwise looks like the player misbehaving.
+      showFailoverNotice(`${videos[videoIndex]?.quality ?? 'Source'} indisponible — passage à ${next.quality}`);
       setVideoIndex(videoIndex + 1);
       return;
     }
@@ -465,6 +488,8 @@ export default function VideoPlayer({
     return () => clearTimeout(hideTimeout.current);
   }, [isPlaying]);
 
+  useEffect(() => () => clearTimeout(failoverTimer.current), []);
+
   // YouTube-style ±10s feedback bubble: scales up while fading out in 600ms.
   // Used by keyboard arrows, double-tap, and the on-screen skip buttons so the
   // user gets the same visual confirmation no matter how they triggered the seek.
@@ -650,15 +675,49 @@ export default function VideoPlayer({
   // different host carries its own (raw) list as a fallback.
   const subtitleTracks = (videoData?.subtitles?.length ? videoData.subtitles : videos[videoIndex]?.subtitles) ?? [];
 
-  // Switch variant on user request — same path as an automatic failover, minus
-  // the "this one is broken" part, so we reset the extraction state too.
-  const selectVideo = (index) => {
-    if (index === videoIndex) { setShowQualityMenu(false); return; }
+  // Everything the user can switch to: every resolved variant (host + quality),
+  // then the embeds no extractor could resolve, which still play through the
+  // host's own player in an iframe. One list, shown both in the controls menu and
+  // on the failure screen.
+  const playerOptions = [
+    ...videos.map((v, i) => ({
+      key: `v${i}`,
+      kind: 'video',
+      index: i,
+      label: v.quality,
+      active: i === videoIndex && !visibleIframeUrl,
+    })),
+    ...(videoData?.sources ?? []).map((s, i) => ({
+      key: `e${i}`,
+      kind: 'embed',
+      url: s.url,
+      label: `${s.name || hostLabel(s.url)} (lecteur externe)`,
+      active: s.url === visibleIframeUrl,
+    })),
+  ];
+
+  // Switch player on user request — same path as an automatic failover, minus
+  // the "this one is broken" part, so the extraction state is reset too.
+  const selectPlayer = (option) => {
     if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
+    clearTimeout(extractTimerRef.current);
+    setShowPlayerMenu(false);
     setExtractedUrl(null);
     setExtractUrls([]);
-    setVideoIndex(index);
-    setShowQualityMenu(false);
+    setVisibleIframeUrl(null);
+    setIframeLoaded(false);
+    setSourcesExhausted(false);
+    setFailoverNotice(null);
+
+    if (option.kind === 'video') {
+      setVideoIndex(option.index);
+      return;
+    }
+    // Unresolved embed: hand this one to the extraction pipeline on its own, so
+    // picking a specific player doesn't silently land on a different one.
+    embedQueueRef.current = [option.url];
+    extractionWonRef.current = false;
+    startExtractionBatch();
   };
 
   // ── Handed over to the app's native player ──
@@ -672,20 +731,41 @@ export default function VideoPlayer({
     );
   }
 
-  // ── All embed sources exhausted and none worked ──
+  // ── Automatic failover ran out ──
+  // Not a dead end: the auto-failover walks the list in our preferred order, but
+  // "unavailable" is often specific to one host (geo-block, expired token, a
+  // player that needs a challenge cleared). So we offer every player we know of
+  // and let the user pick — retrying one by hand frequently works.
   if (sourcesExhausted && !extractedUrl) {
     return (
-      <div ref={containerRef} className="relative w-full h-full bg-black flex flex-col items-center justify-center gap-4 text-center px-6">
-        <div className="w-14 h-14 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center mb-2">
+      <div ref={containerRef} className="relative w-full h-full bg-black flex flex-col items-center justify-center gap-4 text-center px-6 overflow-y-auto py-8">
+        <div className="w-14 h-14 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center">
           <Settings className="w-7 h-7 text-red-400" />
         </div>
-        <p className="text-white/70 font-display font-semibold text-base">Lecteur indisponible</p>
-        <p className="text-white/30 text-sm max-w-xs">
-          Aucune source n'a pu charger cet épisode. Le lecteur est peut-être bloqué ou l'épisode temporairement indisponible.
+        <p className="text-white/70 font-display font-semibold text-base">Vidéo indisponible</p>
+        <p className="text-white/30 text-sm max-w-sm">
+          {playerOptions.length > 0
+            ? 'Cette source n\'a pas répondu. Essayez un autre lecteur :'
+            : 'Aucune source n\'a pu charger cet épisode. Il est peut-être temporairement indisponible.'}
         </p>
+
+        {playerOptions.length > 0 && (
+          <div className="w-full max-w-sm flex flex-col gap-1.5 mt-1">
+            {playerOptions.map((option) => (
+              <button
+                key={option.key}
+                onClick={() => selectPlayer(option)}
+                className="w-full text-left px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white/70 text-sm hover:bg-white/10 hover:text-white transition"
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        )}
+
         <button
           onClick={onBack}
-          className="mt-2 flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-white/60 text-sm hover:bg-white/10 hover:text-white transition"
+          className="mt-1 flex items-center gap-2 px-4 py-2 rounded-xl text-white/40 text-sm hover:text-white transition"
         >
           <ChevronLeft className="w-4 h-4" />
           Retour
@@ -904,6 +984,20 @@ export default function VideoPlayer({
       {isLoading && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/60">
           <div className="w-12 h-12 border-3 border-white/20 border-t-accent-primary rounded-full animate-spin" />
+        </div>
+      )}
+
+      {/* Automatic failover notice — tells the user the switch was deliberate,
+          and offers the picker in case the chosen fallback isn't what they want. */}
+      {failoverNotice && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 px-4 py-2.5 rounded-xl bg-black/85 backdrop-blur-xl border border-white/10 shadow-2xl">
+          <span className="text-white/70 text-xs">{failoverNotice}</span>
+          <button
+            onClick={(e) => { e.stopPropagation(); setFailoverNotice(null); setShowPlayerMenu(true); }}
+            className="text-accent-primary text-xs font-semibold hover:text-accent-glow transition whitespace-nowrap"
+          >
+            Changer
+          </button>
         </div>
       )}
 
@@ -1190,31 +1284,32 @@ export default function VideoPlayer({
                 </button>
               )}
 
-              {/* Quality / source picker — one entry per variant the extractors
-                  resolved, best first (Aniyomi's video list, surfaced to the user). */}
-              {videos.length > 1 && !extractedUrl && (
+              {/* Player picker — every resolved variant (host + quality) plus the
+                  embeds only the host's own player can open. Same list the failure
+                  screen offers, reachable before anything breaks. */}
+              {playerOptions.length > 1 && (
                 <div className="relative">
                   <button
-                    onClick={(e) => { e.stopPropagation(); setShowQualityMenu(!showQualityMenu); }}
-                    className={`px-2.5 py-1.5 rounded-lg hover:bg-white/10 transition text-xs text-white font-medium ${showQualityMenu ? 'bg-white/10' : ''}`}
-                    title="Qualité / source"
+                    onClick={(e) => { e.stopPropagation(); setShowPlayerMenu(!showPlayerMenu); }}
+                    className={`px-2.5 py-1.5 rounded-lg hover:bg-white/10 transition text-xs text-white font-medium ${showPlayerMenu ? 'bg-white/10' : ''}`}
+                    title="Changer de lecteur / qualité"
                   >
-                    {videos[videoIndex]?.quality?.match(/\d{3,4}p/)?.[0] ?? 'Auto'}
+                    {/\d{3,4}p/.exec(videos[videoIndex]?.quality ?? '')?.[0] ?? 'Lecteur'}
                   </button>
-                  {showQualityMenu && (
+                  {showPlayerMenu && (
                     <div
-                      className="absolute bottom-full right-0 mb-2 w-64 max-h-64 overflow-y-auto bg-black/90 backdrop-blur-xl border border-white/10 rounded-xl p-1.5 shadow-2xl"
+                      className="absolute bottom-full right-0 mb-2 w-72 max-h-64 overflow-y-auto bg-black/90 backdrop-blur-xl border border-white/10 rounded-xl p-1.5 shadow-2xl"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      {videos.map((v, i) => (
+                      {playerOptions.map((option) => (
                         <button
-                          key={`${v.url}|${v.quality}`}
-                          onClick={() => selectVideo(i)}
+                          key={option.key}
+                          onClick={() => selectPlayer(option)}
                           className={`w-full text-left px-3 py-2 rounded-lg text-xs transition ${
-                            i === videoIndex ? 'bg-accent-primary/20 text-white' : 'text-white/60 hover:bg-white/10 hover:text-white'
+                            option.active ? 'bg-accent-primary/20 text-white' : 'text-white/60 hover:bg-white/10 hover:text-white'
                           }`}
                         >
-                          {v.quality}
+                          {option.label}
                         </button>
                       ))}
                     </div>

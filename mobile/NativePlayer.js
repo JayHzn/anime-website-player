@@ -63,6 +63,7 @@ export default function NativePlayer({ data, onEvent }) {
   const [duration, setDuration] = useState(0);
   const [dragTime, setDragTime] = useState(null);  // non-null while scrubbing
   const [failed, setFailed] = useState(false);
+  const [failReason, setFailReason] = useState(null);
   const [subtitleTracks, setSubtitleTracks] = useState([]);
   const [activeSubtitleId, setActiveSubtitleId] = useState(null);
 
@@ -156,8 +157,11 @@ export default function NativePlayer({ data, onEvent }) {
     if (index + 1 < videos.length) {
       setIndex(index + 1);
     } else {
+      // Don't hand back to the WebView yet: "unavailable" is usually specific to
+      // one host, so show the picker first and let the user retry one by hand.
+      // Falling back to the WebView player is one of the options it offers.
       setFailed(true);
-      onEvent?.('failed', { reason: error?.message ?? 'playback error' });
+      setFailReason(error?.message ?? null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
@@ -283,14 +287,39 @@ export default function NativePlayer({ data, onEvent }) {
 
   // ── Render ─────────────────────────────────────────────────
 
+  // ── Automatic failover ran out ──
+  // Offer the players rather than dead-ending: a host being unavailable is often
+  // specific to that host (geo-block, expired token), so a manual retry on
+  // another one frequently works.
   if (failed) {
     return (
       <View style={styles.container}>
         <View style={styles.centered}>
-          <Text style={styles.errorTitle}>Lecture impossible</Text>
+          <Text style={styles.errorTitle}>Vidéo indisponible</Text>
           <Text style={styles.errorBody}>
-            Aucune des {videos.length} source(s) résolue(s) n'a pu être lue.
+            {failReason ? `${failReason}. ` : ''}Essayez un autre lecteur :
           </Text>
+
+          <ScrollView style={styles.failList} contentContainerStyle={styles.failListContent}>
+            {videos.map((v, i) => (
+              <Pressable
+                key={`${v.url}|${v.quality}`}
+                style={styles.failItem}
+                onPress={() => { setFailed(false); setFailReason(null); setIndex(i); }}
+              >
+                <Text style={styles.failItemText} numberOfLines={1}>{v.quality}</Text>
+              </Pressable>
+            ))}
+            {/* Hands the frame back to the WebView, which can still open the host's
+                own player in an iframe — the one thing this player can't do. */}
+            <Pressable
+              style={styles.failItem}
+              onPress={() => onEvent?.('failed', { reason: failReason ?? 'user choice' })}
+            >
+              <Text style={styles.failItemText}>Lecteur externe (navigateur)</Text>
+            </Pressable>
+          </ScrollView>
+
           <Pressable style={styles.button} onPress={() => onEvent?.('back', {})}>
             <Text style={styles.buttonText}>Retour</Text>
           </Pressable>
@@ -484,6 +513,14 @@ const styles = StyleSheet.create({
   errorBody: { color: 'rgba(255,255,255,0.5)', fontSize: 13, textAlign: 'center', marginBottom: 16 },
   button: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.1)' },
   buttonText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  failList: { maxHeight: 180, width: '100%', maxWidth: 420, marginBottom: 14 },
+  failListContent: { gap: 6 },
+  failItem: {
+    paddingHorizontal: 16, paddingVertical: 11, borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+  },
+  failItemText: { color: 'rgba(255,255,255,0.75)', fontSize: 13 },
 
   topBar: {
     position: 'absolute', top: 0, left: 0, right: 0,

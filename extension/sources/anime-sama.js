@@ -421,9 +421,11 @@ export class AnimeSamaSource {
       }
     }
 
-    // Filter out sibnet (dropped — CDN requires session cookies)
-    const filtered = sources.filter(s => !s.url.includes('sibnet'));
-    const finalSources = filtered.length > 0 ? filtered : sources;
+    // Sibnet used to be dropped here: its CDN rejects a request without a
+    // Referer, which a page fetch couldn't set. lib/http.js now installs that
+    // header (DNR in the extension, directly in React Native), so it's resolved
+    // like any other host — and it's first in DEFAULT_HOST_PRIORITY.
+    const finalSources = sources;
 
     if (finalSources.length === 0) {
       throw new Error(`No video URL found for episode ${epNum}`);

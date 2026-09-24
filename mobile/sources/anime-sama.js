@@ -385,8 +385,10 @@ export class AnimeSamaSource {
       }
     }
 
-    const filtered = sources.filter(s => !s.url.includes('sibnet'));
-    const finalSources = filtered.length > 0 ? filtered : sources;
+    // Sibnet used to be dropped here (its CDN rejects a request with no Referer).
+    // lib/http.js sets that header now, so it's resolved like any other host —
+    // and it's first in DEFAULT_HOST_PRIORITY.
+    const finalSources = sources;
 
     if (finalSources.length === 0) {
       throw new Error(`No video URL found for episode ${epNum}`);

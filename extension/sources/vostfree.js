@@ -269,7 +269,7 @@ export class VostfreeSource {
     const html = await res.text();
 
     // Each episode has 5 player slots, mapped from the page JS:
-    //   slot 1 (new_player_sibnet)   → Sibnet ID (skip — session cookies required)
+    //   slot 1 (new_player_sibnet)   → Sibnet ID   → https://video.sibnet.ru/shell.php?videoid=${id}
     //   slot 2 (new_player_uqload)   → Uqload ID    → https://uqload.io/embed-${id}.html
     //   slot 3 (new_player_vip)      → Full URL     (Streamsb/SbFull etc.)
     //   slot 4 (new_player_vip)      → Full URL     (Vudeo)
@@ -282,6 +282,7 @@ export class VostfreeSource {
       return m ? m[1].trim() : '';
     }
 
+    const sibnetId = getContent(base + 1);
     const uqloadId = getContent(base + 2);
     const vipUrl1  = getContent(base + 3); // Streamsb/SbFull
     const vipUrl2  = getContent(base + 4); // Vudeo
@@ -289,6 +290,11 @@ export class VostfreeSource {
 
     const sources = [];
 
+    // Sibnet was skipped while we couldn't set a Referer on the CDN request;
+    // lib/http.js does that now, and it's the preferred host.
+    if (sibnetId && /^\d{4,}$/.test(sibnetId)) {
+      sources.push({ name: 'Sibnet', url: `https://video.sibnet.ru/shell.php?videoid=${sibnetId}` });
+    }
     if (uqloadId && !uqloadId.includes(')') && uqloadId.length > 4) {
       sources.push({ name: 'Uqload', url: `https://uqload.io/embed-${uqloadId}.html` });
     }

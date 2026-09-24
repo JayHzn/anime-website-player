@@ -242,7 +242,7 @@ export class VostfreeSource {
     const html = await res.text();
 
     // Each episode has 5 player slots:
-    //   slot 1: Sibnet (skip), 2: Uqload (id), 3/4: full URL, 5: Mytv (id)
+    //   slot 1: Sibnet (id), 2: Uqload (id), 3/4: full URL, 5: Mytv (id)
     const base = (epN - 1) * 5;
 
     function getContent(idx) {
@@ -251,6 +251,7 @@ export class VostfreeSource {
       return m ? m[1].trim() : '';
     }
 
+    const sibnetId = getContent(base + 1);
     const uqloadId = getContent(base + 2);
     const vipUrl1  = getContent(base + 3);
     const vipUrl2  = getContent(base + 4);
@@ -258,6 +259,11 @@ export class VostfreeSource {
 
     const sources = [];
 
+    // Sibnet was skipped while we couldn't set a Referer on the CDN request;
+    // lib/http.js does that now, and it's the preferred host.
+    if (sibnetId && /^\d{4,}$/.test(sibnetId)) {
+      sources.push({ name: 'Sibnet', url: `https://video.sibnet.ru/shell.php?videoid=${sibnetId}` });
+    }
     if (uqloadId && !uqloadId.includes(')') && uqloadId.length > 4) {
       sources.push({ name: 'Uqload', url: `https://uqload.io/embed-${uqloadId}.html` });
     }

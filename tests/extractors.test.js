@@ -166,6 +166,22 @@ describe('video model', () => {
     expect(sorted.map((v) => v.url)).toEqual(['c', 'b', 'a']);
   });
 
+  it('prefers Sibnet over Sendvid', () => {
+    expect(DEFAULT_HOST_PRIORITY.indexOf('sibnet'))
+      .toBeLessThan(DEFAULT_HOST_PRIORITY.indexOf('sendvid'));
+  });
+
+  // Sibnet wins on host even when Sendvid offers a higher resolution: host rank
+  // is the first sort key, so the preference is not silently overridden.
+  it('picks Sibnet first even against a better Sendvid variant', () => {
+    const videos = [
+      createVideo({ url: 'sendvid-1080', host: 'sendvid', resolution: 1080, bandwidth: 9 }),
+      createVideo({ url: 'sibnet-720', host: 'sibnet', resolution: 720, bandwidth: 2 }),
+    ];
+    const sorted = sortVideos(videos, { quality: 1080, hosts: DEFAULT_HOST_PRIORITY });
+    expect(sorted[0].url).toBe('sibnet-720');
+  });
+
   it('never prefers a variant above the requested quality', () => {
     const videos = [
       createVideo({ url: '1080', host: 'voe', resolution: 1080 }),

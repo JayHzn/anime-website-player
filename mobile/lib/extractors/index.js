@@ -24,6 +24,7 @@ export const EXTRACTORS = [sendvid, vidmoly, voe, streamtape, sibnet, packed, ge
  * is the host that behaves best in a browser <video>/hls.js pipeline.
  */
 export const DEFAULT_HOST_PRIORITY = [
+  'sibnet',     // direct mp4, no token in the URL so it can't expire mid-episode
   'sendvid',    // plain file, no JS, no token
   'vidmoly',    // clean HLS master with real quality variants
   'voe',        // HLS + mp4 + subtitles
@@ -34,7 +35,6 @@ export const DEFAULT_HOST_PRIORITY = [
   'streamtape',
   'uqload',
   'vudeo',
-  'sibnet',
   'generic',
 ];
 
